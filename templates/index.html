@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>小说写作助手</title>
+  <link rel="stylesheet" href="/static/css/themes.css">
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body class="theme-light">
+<div id="app">
+
+  <!-- ====== Toolbar ====== -->
+  <div id="toolbar">
+    <div class="toolbar-left">
+      <button class="toolbar-btn" id="btn-back" title="返回作品列表 (Esc)" style="display:none;">← 返回</button>
+      <button class="toolbar-btn" id="btn-search" title="搜索 (Ctrl+P)">🔍 搜索</button>
+    </div>
+    <div class="toolbar-center" id="toolbar-title">小说写作助手</div>
+    <div class="toolbar-right">
+      <button class="toolbar-btn" id="btn-focus" title="专注模式 (F11)">专注</button>
+      <button class="toolbar-btn" id="btn-theme" title="切换主题">主题</button>
+      <button class="toolbar-btn" id="btn-export" title="导出">导出</button>
+      <button class="toolbar-btn" id="btn-backup" title="备份与恢复">备份</button>
+      <button class="toolbar-btn" id="btn-recycle" title="回收站">回收站</button>
+    </div>
+  </div>
+
+  <!-- ====== Main Content ====== -->
+  <div id="main-content">
+
+    <!-- ====== Project List Page ====== -->
+    <div id="project-list-page">
+      <h1>小说写作助手</h1>
+      <button class="btn-new-project" id="btn-new-project">+ 新建作品</button>
+      <div class="project-grid" id="project-grid"></div>
+    </div>
+
+    <!-- ====== Workspace ====== -->
+    <div id="workspace" class="hidden" style="display:flex;flex:1;overflow:hidden;">
+
+      <!-- Sidebar -->
+      <div id="sidebar">
+        <div class="sidebar-header">
+          <span>目录</span>
+          <div class="actions" id="sidebar-actions" style="display:none;">
+            <button id="btn-add-volume" title="新建卷">📁+</button>
+            <button id="btn-add-chapter" title="新建章">📄+</button>
+            <button id="btn-outline" title="大纲编辑">📋</button>
+          </div>
+        </div>
+        <div id="tree-container"></div>
+      </div>
+
+      <!-- Editor Area -->
+      <div id="editor-area">
+        <div id="editor-header">
+          <div class="breadcrumb">
+            <span id="breadcrumb-vol">选择卷</span> / <span id="breadcrumb-ch">选择章</span>
+          </div>
+          <div class="word-stats">
+            中文字数: <strong id="word-count-chinese">0</strong> | 总字数: <strong id="word-count-total">0</strong>
+          </div>
+        </div>
+        <div id="editor-container">
+          <textarea id="editor" placeholder="选择左侧目录树中的章节开始写作..." disabled></textarea>
+        </div>
+        <!-- Version Panel -->
+        <div id="version-panel" class="collapsed">
+          <div class="vp-header" id="vp-header">
+            <span>📜 版本历史</span>
+            <span id="vp-count" style="font-size:11px;color:var(--text-muted);">0 个版本</span>
+          </div>
+          <div class="vp-list" id="vp-list"></div>
+        </div>
+      </div>
+
+      <!-- Right Panel -->
+      <div id="right-panel" class="collapsed">
+        <div class="panel-tabs">
+          <div class="panel-tab active" data-tab="outline">大纲</div>
+          <div class="panel-tab" data-tab="character">人物</div>
+          <div class="panel-tab" data-tab="world">设定</div>
+          <div class="panel-tab" data-tab="inspiration">灵感</div>
+        </div>
+        <div class="panel-content" id="panel-content"></div>
+      </div>
+
+    </div><!-- #workspace -->
+  </div><!-- #main-content -->
+
+  <!-- ====== Toast Container ====== -->
+  <div id="toast-container"></div>
+
+</div><!-- #app -->
+
+<!-- ====== Scripts ====== -->
+<script src="/static/js/utils/word-count.js"></script>
+<script src="/static/js/utils/debounce.js"></script>
+<script src="/static/js/state.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/components/project-list.js"></script>
+<script src="/static/js/components/sidebar.js"></script>
+<script src="/static/js/components/editor.js"></script>
+<script src="/static/js/components/version-panel.js"></script>
+<script src="/static/js/components/outline-tree.js"></script>
+<script src="/static/js/components/character-panel.js"></script>
+<script src="/static/js/components/world-setting-panel.js"></script>
+<script src="/static/js/components/inspiration-panel.js"></script>
+<script src="/static/js/components/search-panel.js"></script>
+<script src="/static/js/components/recycle-bin.js"></script>
+<script src="/static/js/components/export-dialog.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

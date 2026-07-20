@@ -1,0 +1,13 @@
+[project]
+name = "novel-writer"
+version = "1.0.0"
+description = "小说写作助手 - Python Flask + SQLite 桌面写作工具"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "flask>=3.0",
+    "python-docx>=1.0",
+]
+
+[project.scripts]
+novel-writer = "app:main"
