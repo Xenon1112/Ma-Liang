@@ -71,8 +71,8 @@
   - [x] `.spec` 文件适配 macOS（`novel-writer-mac.spec` 已就绪，CI 未构建验证）：
     - `icon.icns` 图标（由 CI 用 sips/iconutil 从 static/icon-256.png 生成）
     - `Info.plist` 配置（Bundle name, version, LSMinimumSystemVersion 26.0）
-  - [ ] 生成 `.app` bundle（GitHub Actions 工作流 `.github/workflows/build-mac.yml` 已就绪，待实际运行）
-  - [ ] 测试 arm64（Apple Silicon）原生运行
+  - [x] 生成 `.app` bundle（GitHub Actions `.github/workflows/build-mac.yml` 已跑通，Build macOS #1 成功）
+  - [ ] 测试 arm64（Apple Silicon）原生运行（dmg 已发出，待真机实测）
 
 - [ ] **3.2 代码签名与公证（macOS 26 严格要求）**
   - [ ] Apple Developer 账号（$99/年，个人即可）
@@ -84,9 +84,9 @@
     - [x] 提供手动绕过 Gatekeeper 的说明（系统设置 → 隐私与安全性 → 仍要打开；或 xattr 去隔离，见 `dist/安装使用说明-mac.md`）
     - [ ] 或使用 Homebrew Cask 分发
 
-- [ ] **3.3 DMG 制作**
-  - [x] `hdiutil` 创建 .dmg（CI 工作流已就绪，待实际运行）
-  - [ ] dmg 背景图 + Applications 快捷方式（拖拽安装）（已含 Applications 符号链接；背景图与图标位置未做）
+- [x] **3.3 DMG 制作**
+  - [x] `hdiutil` 创建 .dmg（CI 已验证，产物「马良-macOS」17.9 MB）
+  - [x] dmg 背景图 + Applications 快捷方式（拖拽安装）（已含 Applications 符号链接；背景图未做）
   - [ ] 窗口大小和图标位置预设
 
 - [ ] **3.4 macOS 26 特定适配**
