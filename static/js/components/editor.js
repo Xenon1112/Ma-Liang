@@ -3,8 +3,12 @@
 const Editor = {
   currentDraftId: null,
   saveTimer: null,
+  saveSnapshot: null, // scheduleSave 时捕获的保存目标 {chapterId, volumeId}
 
   async loadChapter(chapterId) {
+    // 切换前冲刷待触发的自动保存：按快照对旧章节立即保存（此时编辑器还是旧内容）
+    await this.flushSave();
+
     const chapter = await api.chapter.get(chapterId);
     if (!chapter) return;
 
@@ -26,6 +30,9 @@ const Editor = {
   },
 
   async loadVolumePreface(volume) {
+    // 切换前冲刷待触发的自动保存（同上）
+    await this.flushSave();
+
     const draft = await api.draft.getCurrent(null, volume.id);
     const textarea = document.getElementById('editor');
     textarea.value = draft ? draft.content : volume.preface || '';
@@ -43,15 +50,34 @@ const Editor = {
 
   scheduleSave() {
     clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => this.save(), 2000);
+    // 捕获保存目标快照：定时器触发时若章节已切换，仍按快照保存，防止写到新章
+    this.saveSnapshot = {
+      chapterId: AppState.currentChapter?.id || null,
+      volumeId: AppState.currentChapter ? null : (AppState.currentVolume?.id || null),
+    };
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.save();
+    }, 2000);
+  },
+
+  // 立即执行待触发的自动保存（切换章节/卷首语前调用）
+  async flushSave() {
+    if (!this.saveTimer) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    await this.save();
   },
 
   async save() {
-    const chId = AppState.currentChapter?.id;
-    const volId = AppState.currentVolume?.id;
+    // 优先按快照目标保存；无快照（手动保存等）则按当前章节
+    const snap = this.saveSnapshot;
+    this.saveSnapshot = null;
+    const chId = snap ? snap.chapterId : AppState.currentChapter?.id;
+    const volId = snap ? snap.volumeId : (chId ? null : AppState.currentVolume?.id);
     const isPreface = !chId && volId;
 
-    if (!chId && !isPreface) return;
+    if (!chId && !isPreface) return false;
 
     try {
       const content = document.getElementById('editor').value;
@@ -69,9 +95,11 @@ const Editor = {
       // 刷新侧栏字数
       Sidebar.refresh();
       VersionPanel.refresh(chId, isPreface ? volId : null);
+      return true;
     } catch (err) {
       console.error('Save failed:', err);
       toast('保存失败: ' + err.message, 'error');
+      return false;
     }
   },
 
@@ -84,6 +112,10 @@ const Editor = {
 
   // 清空编辑器
   clear() {
+    // 取消待触发的自动保存，防止写入已切换/已删除的章节
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    this.saveSnapshot = null;
     const textarea = document.getElementById('editor');
     textarea.value = '';
     textarea.disabled = true;
@@ -106,12 +138,11 @@ document.addEventListener('DOMContentLoaded', () => {
     Editor.scheduleSave();
   });
 
-  // Ctrl+S 手动保存
-  textarea.addEventListener('keydown', (e) => {
+  // Ctrl+S 手动保存（成功后再提示，避免与"保存失败"提示矛盾）
+  textarea.addEventListener('keydown', async (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
-      Editor.save();
-      toast('已保存');
+      if (await Editor.save()) toast('已保存');
     }
   });
 

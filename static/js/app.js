@@ -33,8 +33,23 @@ const App = {
       console.log('Config not loaded, using defaults');
     }
 
-    // 显示作品列表
-    await ProjectList.refresh();
+    // 加载自定义快捷键绑定
+    Shortcuts.load();
+
+    // 显示版本号
+    try {
+      const ver = await api._get('/api/version');
+      const label = `${ver.name} v${ver.version}${ver.channel ? ' ' + ver.channel : ''}`;
+      document.getElementById('toolbar-title').textContent = label;
+      document.title = label;
+    } catch (e) { /* 忽略 */ }
+
+    // 显示作品列表（失败时也要继续绑定后续按钮，否则全页面按钮无响应）
+    try {
+      await ProjectList.refresh();
+    } catch (e) {
+      toast('加载作品列表失败: ' + (e.message || e), 'error');
+    }
 
     // 绑定工具栏按钮
     document.getElementById('btn-new-project').addEventListener('click', showNewProjectModal);
@@ -67,9 +82,57 @@ const App = {
       RecycleBin.show();
     });
 
-    // 卷/章 操作按钮
-    document.getElementById('btn-add-volume').addEventListener('click', showAddVolumeModal);
-    document.getElementById('btn-add-chapter').addEventListener('click', showAddChapterModal);
+    document.getElementById('btn-shortcuts').addEventListener('click', () => {
+      Shortcuts.openSettings();
+    });
+
+    // 手动保存：小说冲刷自动保存并立即存草稿；剧本保存当前场景所有卡片
+    document.getElementById('btn-save').addEventListener('click', async () => {
+      if (!AppState.currentProject) { toast('请先打开一个作品'); return; }
+      const isScript = AppState.currentProject.project_type && AppState.currentProject.project_type !== 'novel';
+      if (isScript) {
+        if (await CardEditor.saveAll()) toast('已保存');
+        else toast('请先选择左侧的场景');
+      } else {
+        if (await Editor.save()) toast('已保存');
+      }
+    });
+
+    // 侧边栏收起/展开（状态存 localStorage，下次启动恢复）
+    const setSidebarCollapsed = (collapsed) => {
+      document.getElementById('sidebar').classList.toggle('collapsed', collapsed);
+      document.getElementById('btn-expand-sidebar').style.display = collapsed ? '' : 'none';
+      localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+    };
+    document.getElementById('btn-collapse-sidebar').addEventListener('click', () => setSidebarCollapsed(true));
+    document.getElementById('btn-expand-sidebar').addEventListener('click', () => setSidebarCollapsed(false));
+    if (localStorage.getItem('sidebarCollapsed') === '1') setSidebarCollapsed(true);
+
+    // 优雅退出：确认后通知后端关闭服务，并替换为退出提示页
+    document.getElementById('btn-quit').addEventListener('click', async () => {
+      if (!await uiConfirm('确定退出马良吗？写作内容已自动保存。', { okText: '退出' })) return;
+      try { await api._post('/api/shutdown'); } catch (e) { /* 服务器可能已开始关闭 */ }
+      document.body.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:12px;color:var(--text-secondary);">
+        <div style="font-size:20px;">已安全退出马良</div>
+        <div style="font-size:14px;">可以关闭此窗口了</div>
+      </div>`;
+    });
+
+    // 卷/章/幕/场 操作按钮（根据项目类型分发）
+    document.getElementById('btn-add-volume').addEventListener('click', () => {
+      if (AppState.currentProject?.project_type && AppState.currentProject.project_type !== 'novel') {
+        showAddActModal();
+      } else {
+        showAddVolumeModal();
+      }
+    });
+    document.getElementById('btn-add-chapter').addEventListener('click', () => {
+      if (AppState.currentProject?.project_type && AppState.currentProject.project_type !== 'novel') {
+        showAddSceneModal();
+      } else {
+        showAddChapterModal();
+      }
+    });
     document.getElementById('btn-outline').addEventListener('click', () => {
       toggleRightPanel();
       AppState.rightPanelTab = 'outline';
@@ -86,19 +149,30 @@ const App = {
       });
     });
 
-    // 键盘快捷键
+    // 键盘快捷键（可自定义，见 Shortcuts）
     document.addEventListener('keydown', (e) => {
-      // Ctrl+P 搜索
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+      const act = Shortcuts.actionFor(e);
+      if (act === 'global.search') {
         e.preventDefault();
         SearchPanel.show();
+        return;
       }
-      // F11 专注模式
-      if (e.key === 'F11') {
+      if (act === 'global.focus') {
         e.preventDefault();
         App.toggleFocus();
+        return;
       }
-      // Esc 关闭搜索 / 退出专注模式
+      if (act === 'global.prevChapter') {
+        e.preventDefault();
+        App.navigateChapter(-1);
+        return;
+      }
+      if (act === 'global.nextChapter') {
+        e.preventDefault();
+        App.navigateChapter(1);
+        return;
+      }
+      // Esc 关闭搜索 / 退出专注模式（固定键）
       if (e.key === 'Escape') {
         if (SearchPanel.visible) {
           SearchPanel.hide();
@@ -106,19 +180,22 @@ const App = {
           App.toggleFocus();
         }
       }
-      // Ctrl+↑ Ctrl+↓ 切换章节
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        e.preventDefault();
-        App.navigateChapter(e.key === 'ArrowUp' ? -1 : 1);
-      }
     });
   },
 
   async openProject(id) {
-    const project = await api.project.get(id);
+    let project;
+    try {
+      project = await api.project.get(id);
+    } catch (e) {
+      toast('打开作品失败: ' + (e.message || e), 'error');
+      return;
+    }
     if (!project) return;
 
     AppState.setProject(project);
+    AppState.currentAct = null;
+    AppState.currentScene = null;
     AppState.setView('workspace');
 
     document.getElementById('project-list-page').style.display = 'none';
@@ -127,8 +204,27 @@ const App = {
     document.getElementById('toolbar-title').textContent = project.title;
     document.getElementById('sidebar-actions').style.display = '';
 
-    await Sidebar.refresh();
-    Editor.clear();
+    const isScript = project.project_type === 'play' || project.project_type === 'musical';
+    // 切换编辑器视图
+    document.getElementById('editor').style.display = isScript ? 'none' : '';
+    const cardWrap = document.getElementById('card-editor-wrap');
+    if (cardWrap) cardWrap.style.display = isScript ? '' : 'none';
+
+    if (isScript) {
+      document.getElementById('btn-add-volume').textContent = '🎭+';
+      document.getElementById('btn-add-volume').title = '新建幕';
+      document.getElementById('btn-add-chapter').textContent = '🎬+';
+      document.getElementById('btn-add-chapter').title = '新建场';
+      await ScriptSidebar.refresh();
+      CardEditor.clear();
+    } else {
+      document.getElementById('btn-add-volume').textContent = '📁+';
+      document.getElementById('btn-add-volume').title = '新建卷';
+      document.getElementById('btn-add-chapter').textContent = '📄+';
+      document.getElementById('btn-add-chapter').title = '新建章';
+      await Sidebar.refresh();
+      Editor.clear();
+    }
   },
 
   closeProject() {
@@ -143,7 +239,7 @@ const App = {
     document.getElementById('project-list-page').style.display = '';
     document.getElementById('workspace').classList.add('hidden');
     document.getElementById('btn-back').style.display = 'none';
-    document.getElementById('toolbar-title').textContent = '小说写作助手';
+    document.getElementById('toolbar-title').textContent = '马良';
     document.getElementById('sidebar-actions').style.display = 'none';
 
     ProjectList.refresh();
@@ -165,6 +261,22 @@ const App = {
   },
 
   async navigateChapter(direction) {
+    // 剧本/音乐剧项目：按"场"导航（跨幕时进入相邻幕的末场/首场）
+    const ptype = AppState.currentProject?.project_type;
+    if (ptype && ptype !== 'novel') {
+      const flat = [];
+      for (const act of (ScriptSidebar.actData || [])) {
+        for (const sc of (act.scenes || [])) flat.push({ act, sc });
+      }
+      const curIdx = flat.findIndex(x => x.sc.id === AppState.currentScene?.id);
+      const next = flat[curIdx + direction];
+      if (!next) return;
+      AppState.currentAct = next.act;
+      AppState.currentScene = next.sc;
+      await CardEditor.loadScene(next.sc.id);
+      ScriptSidebar.render();
+      return;
+    }
     const volId = AppState.currentVolume?.id;
     if (!volId) return;
     const chapters = await api.chapter.list(volId);
@@ -231,18 +343,26 @@ const BackupDialog = {
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
     overlay.querySelector('#btn-do-backup').onclick = async () => {
-      const result = await api.backup.create();
-      toast(`备份已保存: ${result.filePath}`, 'success');
-      overlay.remove();
+      try {
+        const result = await api.backup.create();
+        toast(`备份已保存: ${result.filePath}`, 'success');
+        overlay.remove();
+      } catch (err) {
+        toast('备份失败: ' + err.message, 'error');
+      }
     };
 
     overlay.querySelector('#btn-do-restore').onclick = async () => {
       const filePath = document.getElementById('restore-path').value.trim();
       if (!filePath) { toast('请输入备份文件路径', 'error'); return; }
-      if (!confirm('恢复备份将覆盖当前所有数据并重启应用，确定继续？')) return;
-      await api.backup.restore(filePath);
-      toast('备份已恢复，请手动重启应用', 'info');
-      overlay.remove();
+      if (!await uiConfirm('恢复备份将覆盖当前所有数据并重启应用，确定继续？', { danger: true, okText: '恢复' })) return;
+      try {
+        await api.backup.restore(filePath);
+        toast('备份已恢复，请手动重启应用', 'info');
+        overlay.remove();
+      } catch (err) {
+        toast('恢复失败: ' + err.message, 'error');
+      }
     };
 
     overlay.querySelector('#btn-show-db-path').onclick = async () => {

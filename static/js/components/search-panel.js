@@ -2,6 +2,7 @@
 
 const SearchPanel = {
   visible: false,
+  searchSeq: 0,
 
   show() {
     if (this.visible) return;
@@ -47,6 +48,7 @@ const SearchPanel = {
   },
 
   async doSearch(keyword) {
+    const seq = ++this.searchSeq;
     const resultsDiv = document.getElementById('search-results');
     if (!keyword) {
       resultsDiv.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">输入关键词开始搜索</p>';
@@ -60,6 +62,7 @@ const SearchPanel = {
     }
 
     const results = await api.search.fullText(projectId, keyword);
+    if (seq !== this.searchSeq) return; // 已有更新的搜索请求，丢弃过期响应
 
     if (results.length === 0) {
       resultsDiv.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">未找到结果</p>';
@@ -85,12 +88,16 @@ const SearchPanel = {
         this.hide();
 
         if (type === 'chapter') {
-          const chapter = await api.chapter.get(id);
-          if (chapter) {
-            const vol = await api.volume.get(chapter.volume_id);
-            if (vol) AppState.setVolume(vol);
-            AppState.setChapter(chapter);
-            Editor.loadChapter(id);
+          try {
+            const chapter = await api.chapter.get(id);
+            if (chapter) {
+              const vol = await api.volume.get(chapter.volume_id);
+              if (vol) AppState.setVolume(vol);
+              AppState.setChapter(chapter);
+              Editor.loadChapter(id);
+            }
+          } catch (err) {
+            toast('该章节所在卷已被删除', 'error');
           }
         } else if (type === 'character') {
           AppState.rightPanelTab = 'character';

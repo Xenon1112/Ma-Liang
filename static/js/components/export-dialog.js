@@ -27,11 +27,15 @@ const ExportDialog = {
           <select id="export-format">
             <option value="txt">TXT 文本文件</option>
             <option value="docx">Word 文档 (.docx)</option>
+            <option value="json">JSON 项目文件（整项目，不含回收站）</option>
           </select>
         </div>
+        <div id="export-json-note" style="display:none;color:var(--text-muted);font-size:12px;margin:-4px 0 8px;">
+          JSON 导出包含整个项目（全部章节、草稿版本、人物、设定等），不含回收站；仅支持全书导出，即使当前选中了单个章节也会导出整本书；导入时会生成副本。
+        </div>
         <div class="form-group">
-          <label>保存路径</label>
-          <input id="export-path" type="text" placeholder="例如: C:/Users/xxx/Desktop/${namePart}.${ext}" style="width:100%;">
+          <label>保存路径（留空自动保存到桌面）</label>
+          <input id="export-path" type="text" placeholder="留空 → 桌面/${escAttr(namePart)}.${ext}；也可填目录或完整路径" style="width:100%;">
         </div>
         <div id="export-docx-options" style="display:none;">
           <div class="form-group">
@@ -40,6 +44,7 @@ const ExportDialog = {
               <option value="SimSun">宋体</option>
               <option value="SimHei">黑体</option>
               <option value="KaiTi">楷体</option>
+              <option value="FangSong">仿宋</option>
               <option value="Microsoft YaHei">微软雅黑</option>
             </select>
           </div>
@@ -70,36 +75,40 @@ const ExportDialog = {
     // 格式切换
     document.getElementById('export-format').addEventListener('change', function() {
       document.getElementById('export-docx-options').style.display = this.value === 'docx' ? 'block' : 'none';
-      const newExt = this.value === 'docx' ? 'docx' : 'txt';
-      document.getElementById('export-path').placeholder = `例如: C:/Users/xxx/Desktop/${namePart}.${newExt}`;
+      document.getElementById('export-json-note').style.display = this.value === 'json' ? 'block' : 'none';
+      const newExt = this.value === 'docx' ? 'docx' : this.value === 'json' ? 'json' : 'txt';
+      document.getElementById('export-path').placeholder = `留空 → 桌面/${namePart}.${newExt}；也可填目录或完整路径`;
     });
 
     document.getElementById('btn-do-export').onclick = async () => {
       const scope = document.getElementById('export-scope').value;
       const format = document.getElementById('export-format').value;
       const filePath = document.getElementById('export-path').value.trim();
-      if (!filePath) { toast('请输入保存路径', 'error'); return; }
 
       try {
-        if (format === 'txt') {
+        let result;
+        if (format === 'json') {
+          // JSON 仅支持全书导出，忽略导出范围
+          result = await api.export.exportJson(projectId, filePath);
+        } else if (format === 'txt') {
           const params = { outputPath: filePath };
           if (scope === 'chapter') params.chapterId = chapterId;
           else params.projectId = projectId;
-          await api.export.toTxt(params);
+          result = await api.export.toTxt(params);
         } else {
           const params = {
             outputPath: filePath,
             options: {
               font: document.getElementById('export-font').value,
-              fontSize: parseInt(document.getElementById('export-font-size').value),
+              fontSize: parseInt(document.getElementById('export-font-size').value) || 12,
               lineSpacing: parseFloat(document.getElementById('export-line-spacing').value),
             },
           };
           if (scope === 'chapter') params.chapterId = chapterId;
           else params.projectId = projectId;
-          await api.export.toDocx(params);
+          result = await api.export.toDocx(params);
         }
-        toast('导出成功', 'success');
+        toast('已导出: ' + result.filePath, 'success');
         overlay.remove();
       } catch (err) {
         toast('导出失败: ' + err.message, 'error');

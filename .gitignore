@@ -4,6 +4,9 @@ __pycache__/
 *.pyo
 *.db
 dist/
+build/
+tools/
+wb-req-nav01.json
 .env
 .DS_Store
 Thumbs.db

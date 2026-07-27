@@ -33,8 +33,28 @@ def create_outline(data):
     conn.close()
     return row_to_dict(row)
 
+def _is_in_subtree(conn, ancestor_id, node_id):
+    """node_id 是否等于 ancestor_id 或位于其子树中（沿 parent 链向上查）"""
+    pid = node_id
+    while pid is not None:
+        if pid == ancestor_id:
+            return True
+        row = conn.execute("SELECT parent_id FROM outlines WHERE id = ?", (pid,)).fetchone()
+        pid = row["parent_id"] if row else None
+    return False
+
 def update_outline(id, data):
     conn = get_conn()
+    # 移动父级时校验：新父节点须存在未删除，且不能是自身或自身后代（成环会导致子树从大纲树消失）
+    new_parent = data.get("parent_id")
+    if "parent_id" in data and new_parent is not None:
+        prow = conn.execute("SELECT id FROM outlines WHERE id = ? AND deleted_at IS NULL", (new_parent,)).fetchone()
+        if not prow:
+            conn.close()
+            raise ValueError("父节点不存在或已删除")
+        if _is_in_subtree(conn, id, new_parent):
+            conn.close()
+            raise ValueError("不能将节点移动到其自身或子节点下")
     allowed = ["title", "content", "node_type", "linked_chapter_id", "parent_id"]
     sets, vals = [], []
     for k in allowed:

@@ -30,7 +30,7 @@ const VersionPanel = {
         <div style="display:flex;gap:4px;">
           <button class="vp-action" data-action="view" data-id="${d.id}" title="查看">👁</button>
           <button class="vp-action" data-action="rollback" data-id="${d.id}" title="回滚" style="color:var(--warning);">↩</button>
-          ${i > 0 ? `<button class="vp-action" data-action="diff" data-id="${d.id}" data-prev="${drafts[i-1].id}" title="对比上一版本" style="color:var(--accent);">Δ</button>` : ''}
+          ${i < drafts.length - 1 ? `<button class="vp-action" data-action="diff" data-id="${d.id}" data-prev="${drafts[i+1].id}" title="对比上一版本" style="color:var(--accent);">Δ</button>` : ''}
         </div>
       </div>
     `).join('');
@@ -47,7 +47,7 @@ const VersionPanel = {
     list.querySelectorAll('[data-action="rollback"]').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm('回滚到此版本？当前内容将自动备份为一个新版本。')) return;
+        if (!await uiConfirm('回滚到此版本？当前内容将自动备份为一个新版本。')) return;
         await api.draft.rollback(parseInt(btn.dataset.id));
         toast('已回滚');
 

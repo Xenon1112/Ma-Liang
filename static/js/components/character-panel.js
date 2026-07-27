@@ -38,22 +38,27 @@ const CharacterPanel = {
     container.querySelectorAll('.char-delete').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm('删除此人物？')) return;
+        if (!await uiConfirm('删除此人物？', { danger: true, okText: '删除' })) return;
         await api.character.delete(parseInt(btn.dataset.id));
         this.selectedId = null;
         this.refresh();
       });
     });
 
-    // 如果之前选中了人物，刷新编辑器
+    // 如果之前选中了人物，刷新编辑器；人物已被删除则清除选中
     if (this.selectedId) {
-      const char = await api.character.get(this.selectedId);
-      if (char) this.renderEditor(char);
+      try {
+        const char = await api.character.get(this.selectedId);
+        if (char) this.renderEditor(char);
+        else this.selectedId = null;
+      } catch (err) {
+        this.selectedId = null;
+      }
     }
   },
 
   async showAddModal() {
-    const name = prompt('人物姓名:');
+    const name = await uiPrompt('人物姓名:');
     if (!name) return;
     await api.character.create({ projectId: AppState.currentProject.id, name });
     toast('人物已创建', 'success');
@@ -62,8 +67,14 @@ const CharacterPanel = {
 
   async selectChar(id) {
     this.selectedId = id;
-    const char = await api.character.get(id);
-    this.renderEditor(char);
+    try {
+      const char = await api.character.get(id);
+      if (!char) throw new Error('not found');
+      this.renderEditor(char);
+    } catch (err) {
+      // 人物可能已被删除：清除选中并刷新列表
+      this.selectedId = null;
+    }
     this.refresh(); // 更新高亮
   },
 
@@ -123,9 +134,10 @@ const CharacterPanel = {
       contentTextarea.addEventListener('input', saveField);
     });
 
-    // 删除字段
+    // 删除字段（字段内容可能很长，需确认）
     editorDiv.querySelectorAll('.char-field-delete').forEach(btn => {
       btn.addEventListener('click', async () => {
+        if (!await uiConfirm('删除此字段？字段内容将永久删除。', { danger: true, okText: '删除' })) return;
         const fieldId = parseInt(btn.dataset.id);
         await api.character.removeField(fieldId);
         this.selectChar(char.id); // 刷新编辑器
@@ -134,7 +146,7 @@ const CharacterPanel = {
 
     // 添加字段
     document.getElementById('char-add-field').onclick = async () => {
-      const fieldName = prompt('字段名（如：外貌、性格、背景）:');
+      const fieldName = await uiPrompt('字段名（如：外貌、性格、背景）:');
       if (!fieldName) return;
       await api.character.addField({ characterId: char.id, fieldName });
       this.selectChar(char.id);

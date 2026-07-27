@@ -1,0 +1,98 @@
+# GitHub Actions 工作流 — 马良 macOS 版打包
+#
+# 触发方式：
+#   1. 手动触发（Actions 页面 → Build macOS → Run workflow）
+#   2. 推送 v* 标签（如 v0.0.1），构建完成后自动上传 DMG 到 GitHub Release
+#
+# 说明：
+#   - PyInstaller 不能跨平台打包，macOS 版必须在 macos runner 上构建
+#   - macos-latest 为 Apple Silicon (arm64)，产物适用于目标用户的 MacBook Air
+#   - 无 Apple 开发者账号，不签名不公证，用户侧需按随附中文说明绕过 Gatekeeper
+
+name: Build macOS
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+      # 1. 检出代码
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # 2. 安装 uv（依赖与打包工具均由 uv 管理）
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v5
+
+      # 3. 同步依赖（dev 组含 pyinstaller）
+      - name: 同步依赖
+        run: uv sync
+
+      # 4. 生成 macOS 图标 icon.icns（sips 出各尺寸，iconutil 合成 icns）
+      - name: 生成 icon.icns
+        run: |
+          mkdir -p icon.iconset
+          sips -z 16 16     static/icon-256.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32     static/icon-256.png --out icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     static/icon-256.png --out icon.iconset/icon_32x32.png
+          sips -z 64 64     static/icon-256.png --out icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   static/icon-256.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256   static/icon-256.png --out icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   static/icon-256.png --out icon.iconset/icon_256x256.png
+          sips -z 512 512   static/icon-256.png --out icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   static/icon-256.png --out icon.iconset/icon_512x512.png
+          sips -z 1024 1024 static/icon-256.png --out icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o icon.icns
+
+      # 5. PyInstaller 打包（novel-writer-mac.spec，产出 .app）
+      - name: PyInstaller 打包
+        run: uv run pyinstaller novel-writer-mac.spec --clean --noconfirm
+
+      # 6. 验证 .app 产物存在（兼容中英文产物名）
+      - name: 验证 .app 产物
+        run: |
+          if [ -d "dist/马良.app" ]; then
+            echo "找到产物: dist/马良.app"
+          elif [ -d "dist/novel-writer.app" ]; then
+            echo "找到产物: dist/novel-writer.app"
+          else
+            echo "错误：未在 dist/ 下找到 .app 产物" >&2
+            ls -la dist/ >&2
+            exit 1
+          fi
+
+      # 7. 制作 DMG（.app + 指向 /Applications 的符号链接，拖拽安装）
+      - name: 制作 DMG
+        run: |
+          APP_PATH="dist/马良.app"
+          [ -d "$APP_PATH" ] || APP_PATH="dist/novel-writer.app"
+          DMG_STAGING="$(mktemp -d)/dmg"
+          mkdir -p "$DMG_STAGING"
+          cp -R "$APP_PATH" "$DMG_STAGING/"
+          ln -s /Applications "$DMG_STAGING/Applications"
+          hdiutil create \
+            -volname "马良" \
+            -srcfolder "$DMG_STAGING" \
+            -ov -format UDZO \
+            "dist/马良-macOS.dmg"
+          ls -lh "dist/马良-macOS.dmg"
+
+      # 8. 上传 DMG 构建产物
+      - name: 上传 DMG 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: 马良-macOS
+          path: dist/马良-macOS.dmg
+
+      # 9. 标签触发时，将 DMG 附加到 GitHub Release
+      - name: 上传到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/马良-macOS.dmg

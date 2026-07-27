@@ -1,0 +1,580 @@
+// ====== 卡片编辑器 ======
+
+const CardEditor = {
+  elements: [],
+  flatElements: [],
+  currentSceneId: null,
+  selectedCardIndex: -1,
+  characterList: [],
+
+  // 将树形元素展开为前序扁平列表，卡片 data-index 统一对应 flatElements
+  flattenElements() {
+    this.flatElements = [];
+    const walk = (list) => {
+      for (const e of list) {
+        this.flatElements.push(e);
+        if (e.children && e.children.length) walk(e.children);
+      }
+    };
+    walk(this.elements);
+  },
+
+  getCard(idx) {
+    return (idx >= 0 && idx < this.flatElements.length) ? this.flatElements[idx] : null;
+  },
+
+  async loadScene(sceneId) {
+    this.currentSceneId = sceneId;
+    const scene = await api.scene.get(sceneId);
+    if (!scene) return;
+
+    AppState.currentScene = scene;
+    document.getElementById('breadcrumb-ch').textContent = scene.title;
+    document.getElementById('breadcrumb-vol').textContent = AppState.currentAct?.title || '';
+
+    // 加载角色列表
+    const projectId = AppState.currentProject?.id;
+    this.characterList = await api.character.list(projectId);
+
+    // 加载元素
+    this.elements = await api.element.list(sceneId);
+    this.selectedCardIndex = -1;
+    this.render();
+  },
+
+  clear() {
+    this.elements = [];
+    this.currentSceneId = null;
+    this.selectedCardIndex = -1;
+    const area = document.getElementById('editor-area');
+    if (document.getElementById('card-editor-wrap')) {
+      document.getElementById('card-editor-wrap').innerHTML = '';
+    }
+  },
+
+  render() {
+    const area = document.getElementById('editor-area');
+    const scene = AppState.currentScene;
+    const scriptType = AppState.currentProject?.project_type || 'play';
+    const isMusical = scriptType === 'musical';
+
+    // 确保有 card-editor-wrap
+    let wrap = document.getElementById('card-editor-wrap');
+    if (!wrap) {
+      // 隐藏 textarea
+      const textarea = document.getElementById('editor');
+      if (textarea) textarea.style.display = 'none';
+
+      wrap = document.createElement('div');
+      wrap.id = 'card-editor-wrap';
+      wrap.style.cssText = 'flex:1;overflow-y:auto;padding:16px 24px;background:var(--editor-bg);';
+      document.getElementById('editor-container').appendChild(wrap);
+    }
+
+    let html = '';
+
+    // 场景信息栏
+    html += `<div id="scene-info-bar" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;padding:12px 16px;margin-bottom:16px;">
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;">
+        <input id="scene-title-input" value="${escAttr(scene?.title || '')}" placeholder="场名" style="flex:1;font-size:16px;font-weight:bold;">
+        <button id="scene-save-btn" style="padding:4px 12px;background:var(--accent);color:white;border-radius:4px;font-size:12px;">保存</button>
+      </div>
+      <textarea id="scene-setting-input" placeholder="场景描述（时间、地点、环境...）" style="width:100%;min-height:48px;resize:vertical;font-size:13px;">${escHtml(scene?.setting || '')}</textarea>
+      <div style="margin-top:8px;font-size:12px;color:var(--text-secondary);">
+        出场人物：
+        <span id="scene-char-tags" style="display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center;"></span>
+        <select id="add-char-select" style="font-size:11px;padding:1px 4px;border:1px dashed var(--border-color);border-radius:4px;background:transparent;max-width:140px;"></select>
+      </div>
+    </div>`;
+
+    // 卡片列表（扁平索引，子元素也有独立索引）
+    this.flattenElements();
+    html += `<div id="card-list">`;
+    for (let i = 0; i < this.elements.length; i++) {
+      html += this.renderCard(this.elements[i], this.flatElements.indexOf(this.elements[i]), isMusical, 0);
+    }
+    html += `</div>`;
+
+    // 底部添加按钮
+    const types = [
+      { type: 'action', label: '🎬 动作', icon: '🎬' },
+      { type: 'dialogue', label: '💬 对白', icon: '💬' },
+    ];
+    if (isMusical) {
+      types.push({ type: 'song', label: '🎵 歌曲', icon: '🎵' });
+    }
+
+    html += `<div style="margin-top:12px;text-align:center;">
+      <span style="color:var(--text-muted);font-size:12px;">${Shortcuts.currentCombo('card.insert')} 插入 | 类型：</span>
+      ${types.map((t, i) => `<button class="add-card-btn" data-type="${t.type}" style="margin:4px;padding:6px 14px;border:1px dashed var(--border-color);border-radius:6px;font-size:13px;cursor:pointer;">${t.label}</button>`).join('')}
+    </div>`;
+
+    wrap.innerHTML = html;
+
+    // 聚焦选中卡片
+    if (this.selectedCardIndex >= 0) {
+      const cards = wrap.querySelectorAll('.script-card');
+      if (cards[this.selectedCardIndex]) {
+        cards[this.selectedCardIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const ta = cards[this.selectedCardIndex].querySelector('textarea');
+        if (ta) setTimeout(() => ta.focus(), 200);
+      }
+    }
+
+    this.bindEvents(wrap, isMusical, scene);
+  },
+
+  renderCard(elem, index, isMusical, depth) {
+    const selected = index === this.selectedCardIndex ? 'border-color:var(--accent);box-shadow:0 0 0 2px var(--accent);' : '';
+    const typeConfig = {
+      action: { icon: '🎬', label: '动作', bg: 'var(--bg-tertiary)', border: 'var(--border-color)' },
+      dialogue: { icon: '💬', label: '对白', bg: 'var(--bg-primary)', border: 'var(--border-color)' },
+      song: { icon: '🎵', label: '歌曲', bg: '#e8f0fe', border: '#90b8f8' },
+      lyric: { icon: '🎤', label: '唱词', bg: '#f3e8ff', border: '#c4a0f0' },
+      ensemble: { icon: '🎼', label: '重唱', bg: '#fff3e0', border: '#f0c080' },
+    };
+    const cfg = typeConfig[elem.element_type] || typeConfig.action;
+    const charName = elem.element_type === 'lyric'
+      ? (elem.character_ids || []).map(id => this.characterList.find(c => c.id === id)?.name).filter(Boolean).join('、')
+      : (elem.character_id ? (this.characterList.find(c => c.id === elem.character_id)?.name || '') : '');
+    const isSongContainer = elem.element_type === 'song';
+    const isEnsemble = elem.element_type === 'ensemble';
+    const isContainer = isSongContainer || isEnsemble;
+    const marginLeft = depth * 24;
+
+    let html = '';
+    html += `<div class="script-card" data-index="${index}" style="margin-bottom:8px;margin-left:${marginLeft}px;background:${cfg.bg};border:1px solid ${cfg.border};border-radius:8px;overflow:hidden;${selected}">`;
+
+    // 卡片头部
+    html += `<div style="display:flex;align-items:center;padding:6px 10px;gap:8px;font-size:12px;border-bottom:1px solid var(--border-color);">
+      <select class="card-type-select" data-index="${index}" style="border:none;background:transparent;font-size:12px;padding:2px;">
+        <option value="action" ${elem.element_type==='action'?'selected':''}>🎬 动作</option>
+        <option value="dialogue" ${elem.element_type==='dialogue'?'selected':''}>💬 对白</option>
+        ${isMusical ? `<option value="song" ${elem.element_type==='song'?'selected':''}>🎵 歌曲</option>` : ''}
+        ${isContainer || elem.element_type==='lyric' ? `<option value="lyric" ${elem.element_type==='lyric'?'selected':''}>🎤 唱词</option>` : ''}
+      </select>`;
+
+    // 角色选择：对白/动作单选下拉；唱词多选按钮（合唱）
+    if (elem.element_type === 'dialogue' || elem.element_type === 'action') {
+      html += `<select class="card-char-select" data-index="${index}" style="border:none;background:transparent;font-size:12px;min-width:80px;">
+        <option value="">选择角色</option>
+        ${this.characterList.map(c => `<option value="${c.id}" ${c.id===elem.character_id?'selected':''}>${escHtml(c.name)}</option>`).join('')}
+        <option value="__new__" style="color:var(--accent);">+ 新建角色</option>
+      </select>`;
+    } else if (elem.element_type === 'lyric') {
+      html += `<button class="card-chars-btn" data-index="${index}" title="选择合唱角色" style="border:1px dashed var(--border-color);background:transparent;font-size:12px;padding:2px 8px;border-radius:4px;cursor:pointer;">${escHtml(charName) || '选择角色'} ▾</button>`;
+    }
+
+    // 歌曲标题（仅歌曲容器）
+    if (isSongContainer) {
+      html += `<input class="card-song-title" data-index="${index}" value="${escAttr(elem.song_title || '')}" placeholder="歌曲名" style="flex:1;border:none;background:transparent;font-size:13px;font-weight:bold;">`;
+    }
+    // 重唱标识
+    if (isEnsemble) {
+      html += `<span style="font-size:13px;font-weight:bold;color:#c8801a;">🎼 重唱（多人同时唱不同的词）</span>`;
+    }
+
+    html += `<span style="flex:1;"></span>`;
+    html += `<button class="card-delete-btn" data-index="${index}" style="font-size:14px;padding:0 4px;color:var(--danger);opacity:0.5;" title="删除 (Delete)">×</button>`;
+    html += `<span class="card-drag-handle" data-index="${index}" draggable="true" style="cursor:grab;font-size:14px;color:var(--text-muted);" title="拖拽排序">⋮⋮</span>`;
+    html += `</div>`;
+
+    // 卡片内容
+    html += `<textarea class="card-content" data-index="${index}" placeholder="${cfg.label}内容..." style="width:100%;border:none;resize:vertical;min-height:${isContainer?'0':'48px'};padding:8px 10px;font-size:14px;line-height:1.6;background:transparent;display:${isContainer?'none':'block'};">${escHtml(elem.content || '')}</textarea>`;
+
+    html += `</div>`;
+
+    // 容器子元素
+    if (isContainer && elem.children) {
+      for (let j = 0; j < elem.children.length; j++) {
+        html += this.renderCard(elem.children[j], this.flatElements.indexOf(elem.children[j]), isMusical, depth + 1);
+      }
+      // 容器内添加按钮
+      html += `<div style="margin-left:${(depth+1)*24}px;margin-bottom:8px;text-align:center;">`;
+      html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="lyric" style="margin:2px;padding:4px 10px;border:1px dashed var(--border-color);border-radius:4px;font-size:11px;">+ 🎤 唱词</button>`;
+      if (isSongContainer) {
+        html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="dialogue" style="margin:2px;padding:4px 10px;border:1px dashed var(--border-color);border-radius:4px;font-size:11px;">+ 💬 歌中对白</button>`;
+        html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="ensemble" style="margin:2px;padding:4px 10px;border:1px dashed #f0c080;border-radius:4px;font-size:11px;">+ 🎼 重唱</button>`;
+      }
+      html += `</div>`;
+    }
+
+    return html;
+  },
+
+  bindEvents(wrap, isMusical, scene) {
+    // 场景信息保存
+    wrap.querySelector('#scene-save-btn').onclick = async () => {
+      const title = wrap.querySelector('#scene-title-input').value.trim();
+      const setting = wrap.querySelector('#scene-setting-input').value;
+      await api.scene.update(scene.id, { title, setting });
+      toast('场景已保存');
+      ScriptSidebar.refresh();
+    };
+
+    // 场景信息自动保存（失焦时）
+    wrap.querySelector('#scene-title-input').addEventListener('blur', () => {
+      wrap.querySelector('#scene-save-btn').click();
+    });
+
+    // 出场人物管理
+    this.renderSceneCharacters(wrap, scene);
+    wrap.querySelector('#add-char-select').addEventListener('change', async (ev) => {
+      const sel = ev.target;
+      const val = sel.value;
+      if (!val) return;
+      sel.value = '';
+      const currentIds = (scene.characters || []).map(c => c.id);
+      if (val === '__new__') {
+        const name = await uiPrompt('新建角色名称:');
+        if (!name) { this.renderSceneCharacters(wrap, scene); return; }
+        const newChar = await api.character.create({ projectId: AppState.currentProject?.id, name });
+        this.characterList.push(newChar);
+        await api.scene.setCharacters(scene.id, [...currentIds, newChar.id]);
+        if (!scene.characters) scene.characters = [];
+        scene.characters.push(newChar);
+        this.renderSceneCharacters(wrap, scene);
+        return;
+      }
+      const cid = parseInt(val);
+      await api.scene.setCharacters(scene.id, [...currentIds, cid]);
+      const found = this.characterList.find(c => c.id === cid);
+      if (found) {
+        if (!scene.characters) scene.characters = [];
+        scene.characters.push(found);
+      }
+      this.renderSceneCharacters(wrap, scene);
+    });
+
+    // 唱词合唱角色多选
+    wrap.querySelectorAll('.card-chars-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const idx = parseInt(btn.dataset.index);
+        const card = this.getCard(idx);
+        if (!card) return;
+        const options = this.characterList.map(c => ({ id: c.id, label: c.name }));
+        const ids = await uiChecklist('选择合唱角色', options, card.character_ids || []);
+        if (ids === null) return;
+        card.character_ids = ids;
+        card.character_id = ids[0] || null;
+        await api.element.update(card.id, { characterIds: ids });
+        this.render();
+      });
+    });
+
+    // 类型切换
+    wrap.querySelectorAll('.card-type-select').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const idx = parseInt(sel.dataset.index);
+        const card = this.getCard(idx);
+        if (card) {
+          const newType = sel.value;
+          card.element_type = newType;
+          await api.element.update(card.id, { element_type: newType });
+          this.render();
+        }
+      });
+    });
+
+    // 角色切换
+    wrap.querySelectorAll('.card-char-select').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const idx = parseInt(sel.dataset.index);
+        if (sel.value === '__new__') {
+          // 新建角色
+          sel.value = ''; // reset
+          const name = await uiPrompt('新建角色名称:');
+          if (!name) return;
+          const projectId = AppState.currentProject?.id;
+          const newChar = await api.character.create({ projectId, name });
+          this.characterList.push(newChar);
+          const card = this.getCard(idx);
+          if (card) {
+            card.character_id = newChar.id;
+            await api.element.update(card.id, { character_id: newChar.id });
+          }
+          this.render();
+          return;
+        }
+        const card = this.getCard(idx);
+        if (card) {
+          const cid = sel.value ? parseInt(sel.value) : null;
+          card.character_id = cid;
+          await api.element.update(card.id, { character_id: cid });
+        }
+      });
+    });
+
+    // 歌曲标题
+    wrap.querySelectorAll('.card-song-title').forEach(inp => {
+      inp.addEventListener('blur', async () => {
+        const idx = parseInt(inp.dataset.index);
+        const card = this.getCard(idx);
+        if (card) {
+          const title = inp.value.trim();
+          card.song_title = title;
+          await api.element.update(card.id, { song_title: title });
+        }
+      });
+    });
+
+    // 内容编辑（自动保存）；闭包捕获元素 id 而非索引，避免列表重建后写错卡片
+    wrap.querySelectorAll('.card-content').forEach(ta => {
+      const cardId = this.getCard(parseInt(ta.dataset.index))?.id;
+      ta.addEventListener('blur', () => this.saveCardContent(ta, cardId));
+      ta.addEventListener('input', debounce(() => this.saveCardContent(ta, cardId), 1000));
+      ta.addEventListener('click', () => {
+        const idx = parseInt(ta.dataset.index);
+        this.selectedCardIndex = idx;
+      });
+    });
+
+    // 删除（物理删除并级联删除子元素，先弹确认）
+    wrap.querySelectorAll('.card-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const idx = parseInt(btn.dataset.index);
+        const elem = this.getCard(idx);
+        if (elem) await this.deleteCard(elem);
+      });
+    });
+
+    // 添加顶层卡片
+    wrap.querySelectorAll('.add-card-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const type = btn.dataset.type;
+        await api.element.create({ sceneId: this.currentSceneId, element_type: type });
+        this.loadScene(this.currentSceneId);
+      });
+    });
+
+    // 歌曲内添加子元素
+    wrap.querySelectorAll('.add-song-child-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const songIdx = parseInt(btn.dataset.songIndex);
+        const childType = btn.dataset.type;
+        const song = this.getCard(songIdx);
+        if (song) {
+          await api.element.create({ sceneId: this.currentSceneId, parent_id: song.id, element_type: childType });
+          this.loadScene(this.currentSceneId);
+        }
+      });
+    });
+
+    // 拖拽排序（同一层级内）
+    let dragIdx = null;
+    const clearIndicators = () => wrap.querySelectorAll('.script-card').forEach(c => {
+      c.style.borderTop = ''; c.style.borderBottom = '';
+    });
+    wrap.querySelectorAll('.card-drag-handle').forEach(handle => {
+      handle.addEventListener('dragstart', (e) => {
+        dragIdx = parseInt(handle.dataset.index);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(dragIdx));
+      });
+      handle.addEventListener('dragend', () => { dragIdx = null; clearIndicators(); });
+    });
+    wrap.addEventListener('dragover', (e) => {
+      if (dragIdx === null || !e.target.closest) return;
+      const cardEl = e.target.closest('.script-card');
+      if (!cardEl) return;
+      e.preventDefault();
+      clearIndicators();
+      const rect = cardEl.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height / 2;
+      cardEl.dataset.dropPos = before ? 'before' : 'after';
+      if (before) cardEl.style.borderTop = '2px solid var(--accent)';
+      else cardEl.style.borderBottom = '2px solid var(--accent)';
+    });
+    wrap.addEventListener('drop', async (e) => {
+      if (dragIdx === null || !e.target.closest) return;
+      const cardEl = e.target.closest('.script-card');
+      clearIndicators();
+      if (!cardEl) { dragIdx = null; return; }
+      e.preventDefault();
+      const targetIdx = parseInt(cardEl.dataset.index);
+      const pos = cardEl.dataset.dropPos || 'after';
+      const src = this.getCard(dragIdx);
+      const tgt = this.getCard(targetIdx);
+      dragIdx = null;
+      if (!src || !tgt || src.id === tgt.id) return;
+      const srcParent = src.parent_id || null;
+      const tgtParent = tgt.parent_id || null;
+      if (srcParent !== tgtParent) {
+        toast('拖拽仅支持同一层级内排序（跨歌曲请用 Tab / Shift+Tab）', 'info');
+        return;
+      }
+      let siblings;
+      if (srcParent === null) {
+        siblings = this.elements;
+      } else {
+        const parent = this.flatElements.find(el => el.id === srcParent);
+        siblings = parent ? (parent.children || []) : [];
+      }
+      const ids = siblings.map(s => s.id).filter(id => id !== src.id);
+      let insertAt = ids.indexOf(tgt.id);
+      if (insertAt === -1) return;
+      if (pos === 'after') insertAt += 1;
+      ids.splice(insertAt, 0, src.id);
+      await api.element.reorder(this.currentSceneId, srcParent, ids);
+      this.loadScene(this.currentSceneId);
+    });
+  },
+
+  // 按元素 id 查找并保存内容；元素已被删除或列表已重建时放弃保存
+  async saveCardContent(ta, cardId) {
+    const elem = this.flatElements.find(el => el.id === cardId);
+    if (!elem) return;
+    const content = ta.value;
+    if (content !== elem.content) {
+      elem.content = content;
+      await api.element.update(elem.id, { content });
+    }
+  },
+
+  // 手动保存：立即保存当前场景所有卡片（冲刷各卡片的防抖自动保存）
+  async saveAll() {
+    if (!this.currentSceneId) return false;
+    const tas = document.querySelectorAll('#card-list .card-content');
+    for (const ta of tas) {
+      const cardId = this.getCard(parseInt(ta.dataset.index))?.id;
+      if (cardId) await this.saveCardContent(ta, cardId);
+    }
+    return true;
+  },
+
+  // 删除卡片：物理删除并级联删除全部子元素，不可恢复，必须确认
+  async deleteCard(elem) {
+    if (!await uiConfirm('确定删除此卡片吗？将同时删除其下所有子元素，且不可恢复。', { danger: true, okText: '删除' })) return;
+    await api.element.delete(elem.id);
+    toast('已删除');
+    await this.loadScene(this.currentSceneId);
+  },
+
+  async renderSceneCharacters(wrap, scene) {
+    const tagsDiv = wrap.querySelector('#scene-char-tags');
+    const chars = scene.characters || [];
+    const projectId = AppState.currentProject?.id;
+    const allChars = await api.character.list(projectId);
+
+    tagsDiv.innerHTML = chars.map(c => {
+      const ch = allChars.find(ac => ac.id === c.id);
+      return `<span style="background:var(--bg-active);border-radius:10px;padding:1px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px;">
+        ${escHtml(ch?.name || c.name)}
+        <span class="char-remove" data-cid="${c.id}" style="cursor:pointer;opacity:0.5;">×</span>
+      </span>`;
+    }).join('');
+
+    tagsDiv.querySelectorAll('.char-remove').forEach(sp => {
+      sp.addEventListener('click', async () => {
+        const newIds = chars.filter(c => c.id !== parseInt(sp.dataset.cid)).map(c => c.id);
+        await api.scene.setCharacters(scene.id, newIds);
+        scene.characters = chars.filter(c => c.id !== parseInt(sp.dataset.cid));
+        this.renderSceneCharacters(wrap, scene);
+      });
+    });
+
+    // 填充“添加出场角色”下拉框（只列尚未出场的角色）
+    const picker = wrap.querySelector('#add-char-select');
+    if (picker) {
+      const currentIds = chars.map(c => c.id);
+      const available = allChars.filter(c => !currentIds.includes(c.id));
+      picker.innerHTML = `<option value="">＋ 添加出场角色</option>` +
+        available.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('') +
+        `<option value="__new__" style="color:var(--accent);">＋ 新建角色…</option>`;
+    }
+  },
+};
+
+// ====== 快捷键（可自定义，见 Shortcuts；默认绑定保持不变） ======
+document.addEventListener('keydown', (e) => {
+  if (AppState.currentProject?.project_type === 'novel') return;
+
+  const act = Shortcuts.actionFor(e);
+  if (!act || !act.startsWith('card.')) return;
+
+  const idx = CardEditor.selectedCardIndex;
+  const elems = CardEditor.flatElements;
+  const hasSelection = idx >= 0 && idx < elems.length;
+  const tag = e.target.tagName || '';
+  const isEditable = /^(INPUT|TEXTAREA|SELECT)$/.test(tag) || e.target.isContentEditable;
+  const inCardArea = !!(e.target.closest && e.target.closest('#card-editor-wrap'));
+
+  // 类型切换（编辑文本时不触发）
+  const typeFor = {
+    'card.typeAction': 'action',
+    'card.typeDialogue': 'dialogue',
+    'card.typeLyric': 'lyric',
+    'card.typeSong': 'song',
+  }[act];
+  if (typeFor) {
+    if (isEditable || !hasSelection) return;
+    e.preventDefault();
+    elems[idx].element_type = typeFor;
+    api.element.update(elems[idx].id, { element_type: typeFor });
+    CardEditor.render();
+    return;
+  }
+
+  // 插入新卡片（随后按 1~4 选类型）
+  if (act === 'card.insert') {
+    if (!CardEditor.currentSceneId) return;
+    e.preventDefault();
+    const handler = async (ev) => {
+      const typeMap = { '1': 'action', '2': 'dialogue', '3': 'lyric', '4': 'song' };
+      if (typeMap[ev.key] && CardEditor.currentSceneId) {
+        ev.preventDefault();
+        await api.element.create({ sceneId: CardEditor.currentSceneId, element_type: typeMap[ev.key] });
+        await CardEditor.loadScene(CardEditor.currentSceneId);
+      }
+      document.removeEventListener('keydown', handler);
+    };
+    document.addEventListener('keydown', handler, { once: true });
+    return;
+  }
+
+  // 删除当前卡片（编辑文本时不触发；与 × 按钮一样走确认）
+  if (act === 'card.delete') {
+    if (isEditable || !hasSelection) return;
+    e.preventDefault();
+    CardEditor.deleteCard(elems[idx]);
+    return;
+  }
+
+  // 快速切换角色（编辑文本时不触发）
+  if (act === 'card.switchChar') {
+    if (isEditable || !hasSelection) return;
+    e.preventDefault();
+    (async () => {
+      const name = await uiPrompt('输入角色名（模糊匹配）:');
+      if (name) {
+        const found = CardEditor.characterList.find(c => c.name.includes(name));
+        if (found) {
+          elems[idx].character_id = found.id;
+          api.element.update(elems[idx].id, { character_id: found.id });
+          CardEditor.render();
+        }
+      }
+    })();
+    return;
+  }
+
+  // 移入 / 移出歌曲（焦点在卡片编辑区内才生效，避免抢走表单里的 Tab 焦点切换）
+  if (act === 'card.indent' || act === 'card.outdent') {
+    if (!inCardArea || !hasSelection) return;
+    e.preventDefault();
+    (async () => {
+      if (act === 'card.outdent') {
+        await api.element.move(elems[idx].id, null);
+      } else {
+        for (let i = idx - 1; i >= 0; i--) {
+          if (elems[i].element_type === 'song') {
+            await api.element.move(elems[idx].id, elems[i].id);
+            break;
+          }
+        }
+      }
+      await CardEditor.loadScene(CardEditor.currentSceneId);
+    })();
+    return;
+  }
+});

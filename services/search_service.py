@@ -25,7 +25,7 @@ def full_text(project_id, keyword, types=None):
             FROM chapters c
             JOIN volumes v ON c.volume_id = v.id
             LEFT JOIN drafts d ON d.chapter_id = c.id AND d.is_current = 1
-            WHERE c.project_id = ? AND c.deleted_at IS NULL
+            WHERE c.project_id = ? AND c.deleted_at IS NULL AND v.deleted_at IS NULL
             AND (c.title LIKE ? OR d.content LIKE ?)
         """, (project_id, kw, kw)).fetchall()
         for r in rows:

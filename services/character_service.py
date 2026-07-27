@@ -22,7 +22,7 @@ def get_character(id):
         FROM character_appearances ca
         JOIN chapters c ON ca.chapter_id = c.id
         JOIN volumes v ON c.volume_id = v.id
-        WHERE ca.character_id = ?
+        WHERE ca.character_id = ? AND c.deleted_at IS NULL AND v.deleted_at IS NULL
     """, (id,)).fetchall()]
     conn.close()
     return char
@@ -98,9 +98,11 @@ def reorder_fields(character_id, ordered_ids):
 
 def set_appearances(character_id, appearances):
     conn = get_conn()
-    conn.execute("DELETE FROM character_appearances WHERE character_id = ?", (character_id,))
-    for a in (appearances or []):
-        conn.execute("INSERT OR REPLACE INTO character_appearances (character_id, chapter_id, note) VALUES (?, ?, ?)",
-                     (character_id, a.get("chapter_id"), a.get("note", "")))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("DELETE FROM character_appearances WHERE character_id = ?", (character_id,))
+        for a in (appearances or []):
+            conn.execute("INSERT OR REPLACE INTO character_appearances (character_id, chapter_id, note) VALUES (?, ?, ?)",
+                         (character_id, a.get("chapter_id"), a.get("note", "")))
+        conn.commit()
+    finally:
+        conn.close()

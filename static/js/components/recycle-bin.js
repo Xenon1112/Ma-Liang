@@ -53,7 +53,7 @@ const RecycleBin = {
     // 彻底删除
     overlay.querySelectorAll('.recycle-delete').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('此操作不可撤销，确定彻底删除？')) return;
+        if (!await uiConfirm('此操作不可撤销，确定彻底删除？', { danger: true, okText: '彻底删除' })) return;
         await api.recycle.permanentlyDelete(btn.dataset.type, parseInt(btn.dataset.id));
         toast('已彻底删除');
         overlay.remove();
@@ -63,7 +63,7 @@ const RecycleBin = {
 
     // 清理过期
     document.getElementById('btn-clean-expired').onclick = async () => {
-      const count = await api.recycle.cleanExpired();
+      const { count } = await api.recycle.cleanExpired();
       toast(`已清理 ${count} 条过期记录`);
       overlay.remove();
       RecycleBin.show();
@@ -72,6 +72,6 @@ const RecycleBin = {
 };
 
 function typeLabel(type) {
-  const map = { project:'作品', volume:'卷', chapter:'章', outline:'大纲', character:'人物', world_setting:'设定', inspiration:'灵感' };
+  const map = { project:'作品', volume:'卷', chapter:'章', act:'幕', scene:'场', outline:'大纲', character:'人物', world_setting:'设定', inspiration:'灵感' };
   return map[type] || type;
 }

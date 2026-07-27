@@ -31,6 +31,8 @@ const api = {
     update: (id, fields) => api._put(`/api/projects/${id}`, fields),
     delete: (id) => api._delete(`/api/projects/${id}`),
     getStats: (id) => api._get(`/api/projects/${id}/stats`),
+    // 导入整项目 JSON，body 直接是导出文件解析后的对象，返回新副本
+    importProject: (jsonObj) => api._post('/api/projects/import', jsonObj),
   },
 
   volume: {
@@ -107,6 +109,8 @@ const api = {
   export: {
     toTxt: (params) => api._post('/api/export/txt', params),
     toDocx: (params) => api._post('/api/export/docx', params),
+    // 整项目导出为 JSON 文件，outputPath 可空（空则写桌面）
+    exportJson: (projectId, outputPath) => api._post('/api/export/json', { projectId, outputPath }),
   },
 
   backup: {
@@ -125,6 +129,35 @@ const api = {
 
   search: {
     fullText: (projectId, keyword, types) => api._get('/api/search', { projectId, keyword, types: types?.join(',') }),
+  },
+
+  act: {
+    list: (projectId) => api._get('/api/acts', { projectId }),
+    get: (id) => api._get(`/api/acts/${id}`),
+    create: (data) => api._post('/api/acts', data),
+    update: (id, fields) => api._put(`/api/acts/${id}`, fields),
+    delete: (id) => api._delete(`/api/acts/${id}`),
+    reorder: (projectId, orderedIds) => api._post('/api/acts/reorder', { projectId, orderedIds }),
+  },
+
+  scene: {
+    list: (actId) => api._get('/api/scenes', { actId }),
+    get: (id) => api._get(`/api/scenes/${id}`),
+    create: (data) => api._post('/api/scenes', data),
+    update: (id, fields) => api._put(`/api/scenes/${id}`, fields),
+    delete: (id) => api._delete(`/api/scenes/${id}`),
+    reorder: (actId, orderedIds) => api._post('/api/scenes/reorder', { actId, orderedIds }),
+    setCharacters: (sceneId, characterIds) => api._put(`/api/scenes/${sceneId}/characters`, { characterIds }),
+  },
+
+  element: {
+    list: (sceneId) => api._get('/api/elements', { sceneId }),
+    get: (id) => api._get(`/api/elements/${id}`),
+    create: (data) => api._post('/api/elements', data),
+    update: (id, fields) => api._put(`/api/elements/${id}`, fields),
+    delete: (id) => api._delete(`/api/elements/${id}`),
+    reorder: (sceneId, parentId, orderedIds) => api._post('/api/elements/reorder', { sceneId, parentId, orderedIds }),
+    move: (elementId, parentId) => api._post(`/api/elements/${elementId}/move`, { parentId }),
   },
 
   app: {

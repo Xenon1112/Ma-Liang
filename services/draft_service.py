@@ -26,31 +26,49 @@ def save_draft(data):
     version_tag = data.get("version_tag", "auto")
     new_hash = hash_content(content)
 
-    current = get_current_draft(chapter_id, volume_id)
-    if current and current.get("content_hash") == new_hash:
+    try:
+        # 事务内完成"读 current → 置旧 → 插新"，防止并发自动保存产生两个 current
+        conn.execute("BEGIN IMMEDIATE")
+        if chapter_id:
+            row = conn.execute(
+                "SELECT * FROM drafts WHERE chapter_id = ? AND is_current = 1 ORDER BY version_number DESC LIMIT 1",
+                (chapter_id,)).fetchone()
+        elif volume_id:
+            row = conn.execute(
+                "SELECT * FROM drafts WHERE volume_id = ? AND is_current = 1 ORDER BY version_number DESC LIMIT 1",
+                (volume_id,)).fetchone()
+        else:
+            row = None
+        current = row_to_dict(row)
+
+        if current and current.get("content_hash") == new_hash:
+            conn.commit()
+            return current
+
+        new_version = (current["version_number"] + 1) if current else 1
+        chinese, total = count_words(content)
+
+        # 取消旧的 current
+        if current:
+            conn.execute("UPDATE drafts SET is_current = 0 WHERE id = ?", (current["id"],))
+
+        cur = conn.execute("""
+            INSERT INTO drafts (chapter_id, volume_id, content, version_number, word_count, change_note, version_tag, is_current, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+        """, (chapter_id, volume_id, content, new_version, total, change_note, version_tag, new_hash))
+
+        # 更新 word_count
+        if chapter_id:
+            conn.execute("UPDATE chapters SET word_count = ?, updated_at = datetime('now','localtime') WHERE id = ?", (total, chapter_id))
+
+        conn.commit()
+        row = conn.execute("SELECT * FROM drafts WHERE id = ?", (cur.lastrowid,)).fetchone()
+        return row_to_dict(row)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         conn.close()
-        return current
-
-    new_version = (current["version_number"] + 1) if current else 1
-    chinese, total = count_words(content)
-
-    # 取消旧的 current
-    if current:
-        conn.execute("UPDATE drafts SET is_current = 0 WHERE id = ?", (current["id"],))
-
-    cur = conn.execute("""
-        INSERT INTO drafts (chapter_id, volume_id, content, version_number, word_count, change_note, version_tag, is_current, content_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-    """, (chapter_id, volume_id, content, new_version, total, change_note, version_tag, new_hash))
-
-    # 更新 word_count
-    if chapter_id:
-        conn.execute("UPDATE chapters SET word_count = ?, updated_at = datetime('now','localtime') WHERE id = ?", (total, chapter_id))
-
-    conn.commit()
-    row = conn.execute("SELECT * FROM drafts WHERE id = ?", (cur.lastrowid,)).fetchone()
-    conn.close()
-    return row_to_dict(row)
 
 def list_drafts(chapter_id=None, volume_id=None):
     conn = get_conn()
@@ -148,7 +166,20 @@ def rollback_draft(draft_id):
 
 def delete_draft(draft_id):
     conn = get_conn()
+    row = conn.execute("SELECT * FROM drafts WHERE id = ?", (draft_id,)).fetchone()
     conn.execute("DELETE FROM drafts WHERE id = ?", (draft_id,))
+    # 删除的是当前版本时，把同章/卷下版本号最大的剩余版本提升为 current，避免编辑器读到空
+    if row and row["is_current"]:
+        if row["chapter_id"]:
+            nxt = conn.execute(
+                "SELECT id FROM drafts WHERE chapter_id = ? ORDER BY version_number DESC LIMIT 1",
+                (row["chapter_id"],)).fetchone()
+        else:
+            nxt = conn.execute(
+                "SELECT id FROM drafts WHERE volume_id = ? ORDER BY version_number DESC LIMIT 1",
+                (row["volume_id"],)).fetchone()
+        if nxt:
+            conn.execute("UPDATE drafts SET is_current = 1 WHERE id = ?", (nxt["id"],))
     conn.commit()
     conn.close()
 
@@ -159,16 +190,19 @@ def create_snapshot(data):
 
 def clean_old_versions(chapter_id=None, volume_id=None, keep_count=50):
     conn = get_conn()
+    # keep_count 至少为 1，防止传 0 删光全部版本
+    keep_count = max(1, keep_count)
     if chapter_id:
-        rows = conn.execute("SELECT id FROM drafts WHERE chapter_id = ? ORDER BY version_number DESC", (chapter_id,)).fetchall()
+        rows = conn.execute("SELECT id, is_current FROM drafts WHERE chapter_id = ? ORDER BY version_number DESC", (chapter_id,)).fetchall()
     elif volume_id:
-        rows = conn.execute("SELECT id FROM drafts WHERE volume_id = ? ORDER BY version_number DESC", (volume_id,)).fetchall()
+        rows = conn.execute("SELECT id, is_current FROM drafts WHERE volume_id = ? ORDER BY version_number DESC", (volume_id,)).fetchall()
     else:
         rows = []
     if len(rows) <= keep_count:
         conn.close()
         return 0
-    to_delete = [r["id"] for r in rows[keep_count:]]
+    # 永不删除当前版本
+    to_delete = [r["id"] for r in rows[keep_count:] if not r["is_current"]]
     for did in to_delete:
         conn.execute("DELETE FROM drafts WHERE id = ?", (did,))
     conn.commit()

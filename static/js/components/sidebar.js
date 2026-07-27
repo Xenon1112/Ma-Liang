@@ -143,7 +143,7 @@ function showContextMenu(x, y, type, id) {
 }
 
 async function renameItem(type, id) {
-  const name = prompt('新名称:');
+  const name = await uiPrompt('新名称:');
   if (!name) return;
   if (type === 'volume') {
     await api.volume.update(id, { title: name });
@@ -154,19 +154,28 @@ async function renameItem(type, id) {
 }
 
 async function deleteItem(type, id) {
-  if (!confirm('确定删除吗？将移入回收站。')) return;
+  if (!await uiConfirm('确定删除吗？将移入回收站。', { danger: true, okText: '删除' })) return;
   if (type === 'volume') {
     await api.volume.delete(id);
   } else {
     await api.chapter.delete(id);
   }
   toast('已移入回收站');
+  // 删除的正是当前打开的卷/章时，清空编辑器状态，防止继续写入已删除实体
+  if (type === 'volume' && AppState.currentVolume?.id === id) {
+    AppState.setVolume(null);
+    AppState.setChapter(null);
+    Editor.clear();
+  } else if (type === 'chapter' && AppState.currentChapter?.id === id) {
+    AppState.setChapter(null);
+    Editor.clear();
+  }
   Sidebar.refresh();
 }
 
 // ====== 新建卷/章 ======
 async function showAddVolumeModal() {
-  const title = prompt('卷名:');
+  const title = await uiPrompt('卷名:');
   if (!title) return;
   await api.volume.create({ projectId: AppState.currentProject.id, title });
   toast('卷已创建', 'success');
@@ -176,7 +185,7 @@ async function showAddVolumeModal() {
 async function showAddChapterModal() {
   const volId = AppState.currentVolume?.id;
   if (!volId) { toast('请先选择一个卷', 'error'); return; }
-  const title = prompt('章名:');
+  const title = await uiPrompt('章名:');
   if (!title) return;
   await api.chapter.create({ volumeId: volId, projectId: AppState.currentProject.id, title });
   toast('章已创建', 'success');

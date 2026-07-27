@@ -58,7 +58,7 @@ const WorldSettingPanel = {
     container.querySelectorAll('.setting-delete').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm('删除此设定？')) return;
+        if (!await uiConfirm('删除此设定？', { danger: true, okText: '删除' })) return;
         await api.worldSetting.delete(parseInt(btn.dataset.id));
         this.refresh();
       });

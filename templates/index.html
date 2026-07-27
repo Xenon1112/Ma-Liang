@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>小说写作助手</title>
+  <title>马良</title>
+  <link rel="icon" href="/favicon.ico">
   <link rel="stylesheet" href="/static/css/themes.css">
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
@@ -16,13 +17,16 @@
       <button class="toolbar-btn" id="btn-back" title="返回作品列表 (Esc)" style="display:none;">← 返回</button>
       <button class="toolbar-btn" id="btn-search" title="搜索 (Ctrl+P)">🔍 搜索</button>
     </div>
-    <div class="toolbar-center" id="toolbar-title">小说写作助手</div>
+    <div class="toolbar-center" id="toolbar-title">马良</div>
     <div class="toolbar-right">
+      <button class="toolbar-btn" id="btn-save" title="保存当前内容">💾 保存</button>
       <button class="toolbar-btn" id="btn-focus" title="专注模式 (F11)">专注</button>
       <button class="toolbar-btn" id="btn-theme" title="切换主题">主题</button>
       <button class="toolbar-btn" id="btn-export" title="导出">导出</button>
       <button class="toolbar-btn" id="btn-backup" title="备份与恢复">备份</button>
       <button class="toolbar-btn" id="btn-recycle" title="回收站">回收站</button>
+      <button class="toolbar-btn" id="btn-shortcuts" title="自定义快捷键">快捷键</button>
+      <button class="toolbar-btn" id="btn-quit" title="退出程序">退出</button>
     </div>
   </div>
 
@@ -31,7 +35,7 @@
 
     <!-- ====== Project List Page ====== -->
     <div id="project-list-page">
-      <h1>小说写作助手</h1>
+      <h1>马良</h1>
       <button class="btn-new-project" id="btn-new-project">+ 新建作品</button>
       <div class="project-grid" id="project-grid"></div>
     </div>
@@ -43,10 +47,13 @@
       <div id="sidebar">
         <div class="sidebar-header">
           <span>目录</span>
-          <div class="actions" id="sidebar-actions" style="display:none;">
-            <button id="btn-add-volume" title="新建卷">📁+</button>
-            <button id="btn-add-chapter" title="新建章">📄+</button>
-            <button id="btn-outline" title="大纲编辑">📋</button>
+          <div style="display:flex;align-items:center;gap:4px;">
+            <div class="actions" id="sidebar-actions" style="display:none;">
+              <button id="btn-add-volume" title="新建卷">📁+</button>
+              <button id="btn-add-chapter" title="新建章">📄+</button>
+              <button id="btn-outline" title="大纲编辑">📋</button>
+            </div>
+            <button id="btn-collapse-sidebar" title="收起目录">«</button>
           </div>
         </div>
         <div id="tree-container"></div>
@@ -55,8 +62,11 @@
       <!-- Editor Area -->
       <div id="editor-area">
         <div id="editor-header">
-          <div class="breadcrumb">
-            <span id="breadcrumb-vol">选择卷</span> / <span id="breadcrumb-ch">选择章</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="btn-expand-sidebar" title="展开目录" style="display:none;">»</button>
+            <div class="breadcrumb">
+              <span id="breadcrumb-vol">选择卷</span> / <span id="breadcrumb-ch">选择章</span>
+            </div>
           </div>
           <div class="word-stats">
             中文字数: <strong id="word-count-chinese">0</strong> | 总字数: <strong id="word-count-total">0</strong>
@@ -99,9 +109,13 @@
 <script src="/static/js/utils/debounce.js"></script>
 <script src="/static/js/state.js"></script>
 <script src="/static/js/api.js"></script>
+<script src="/static/js/components/modal.js"></script>
+<script src="/static/js/shortcuts.js"></script>
 <script src="/static/js/components/project-list.js"></script>
 <script src="/static/js/components/sidebar.js"></script>
+<script src="/static/js/components/script-sidebar.js"></script>
 <script src="/static/js/components/editor.js"></script>
+<script src="/static/js/components/card-editor.js"></script>
 <script src="/static/js/components/version-panel.js"></script>
 <script src="/static/js/components/outline-tree.js"></script>
 <script src="/static/js/components/character-panel.js"></script>

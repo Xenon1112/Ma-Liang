@@ -15,8 +15,9 @@ def get_project(id):
 def create_project(data):
     conn = get_conn()
     cur = conn.execute(
-        "INSERT INTO projects (title, subtitle, author, description) VALUES (?, ?, ?, ?)",
-        (data["title"], data.get("subtitle", ""), data.get("author", ""), data.get("description", ""))
+        "INSERT INTO projects (title, subtitle, author, description, project_type) VALUES (?, ?, ?, ?, ?)",
+        (data["title"], data.get("subtitle", ""), data.get("author", ""),
+         data.get("description", ""), data.get("project_type", "novel"))
     )
     conn.commit()
     row = conn.execute("SELECT * FROM projects WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -25,7 +26,7 @@ def create_project(data):
 
 def update_project(id, data):
     conn = get_conn()
-    allowed = ["title", "subtitle", "author", "description", "status"]
+    allowed = ["title", "subtitle", "author", "description", "status", "project_type"]
     sets = []
     vals = []
     for k in allowed:
@@ -51,9 +52,11 @@ def get_stats(project_id):
     conn = get_conn()
     row = conn.execute("""
         SELECT
-            (SELECT COALESCE(SUM(word_count), 0) FROM chapters WHERE project_id = ? AND deleted_at IS NULL) AS total_words,
+            (SELECT COALESCE(SUM(c.word_count), 0) FROM chapters c JOIN volumes v ON c.volume_id = v.id
+             WHERE c.project_id = ? AND c.deleted_at IS NULL AND v.deleted_at IS NULL) AS total_words,
             (SELECT COUNT(*) FROM volumes WHERE project_id = ? AND deleted_at IS NULL) AS volume_count,
-            (SELECT COUNT(*) FROM chapters WHERE project_id = ? AND deleted_at IS NULL) AS chapter_count,
+            (SELECT COUNT(*) FROM chapters c JOIN volumes v ON c.volume_id = v.id
+             WHERE c.project_id = ? AND c.deleted_at IS NULL AND v.deleted_at IS NULL) AS chapter_count,
             (SELECT COUNT(*) FROM characters WHERE project_id = ? AND deleted_at IS NULL) AS character_count,
             (SELECT COUNT(*) FROM drafts WHERE chapter_id IN (SELECT id FROM chapters WHERE project_id = ?)) AS draft_count
     """, (project_id, project_id, project_id, project_id, project_id)).fetchone()

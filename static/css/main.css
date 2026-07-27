@@ -137,6 +137,30 @@ ul, ol { list-style: none; }
   background: var(--bg-hover);
 }
 
+/* 侧边栏收起/展开 */
+#sidebar.collapsed {
+  width: 0;
+  min-width: 0;
+  border: none;
+  overflow: hidden;
+}
+
+#btn-collapse-sidebar, #btn-expand-sidebar {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+#btn-collapse-sidebar:hover, #btn-expand-sidebar:hover {
+  background: var(--bg-hover);
+}
+
 #tree-container {
   flex: 1;
   overflow-y: auto;

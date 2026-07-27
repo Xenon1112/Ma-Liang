@@ -16,7 +16,10 @@ const OutlinePanel = {
     container.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <strong>大纲</strong>
-        <button id="btn-add-outline" style="padding:3px 8px;border-radius:4px;background:var(--accent);color:white;font-size:12px;">+ 新增</button>
+        <div style="display:flex;gap:4px;">
+          <button id="btn-collapse-outline" style="padding:3px 6px;border-radius:4px;border:1px solid var(--border-color);font-size:11px;color:var(--text-secondary);" title="全部收起">◀◀</button>
+          <button id="btn-add-outline" style="padding:3px 8px;border-radius:4px;background:var(--accent);color:white;font-size:12px;">+ 新增</button>
+        </div>
       </div>
       <div id="outline-tree">${this.renderNodes(this.treeData)}</div>
       <div id="outline-editor" style="display:none;margin-top:12px;padding:12px;background:var(--bg-primary);border-radius:6px;border:1px solid var(--border-color);"></div>
@@ -24,6 +27,19 @@ const OutlinePanel = {
 
     // 绑定事件
     document.getElementById('btn-add-outline').onclick = () => this.showEditor();
+
+    let allCollapsed = false;
+    document.getElementById('btn-collapse-outline').onclick = () => {
+      allCollapsed = !allCollapsed;
+      container.querySelectorAll('.outline-toggle').forEach(el => {
+        const li = el.closest('li');
+        const childUl = li?.querySelector('ul');
+        if (childUl) {
+          childUl.style.display = allCollapsed ? 'none' : '';
+          el.textContent = allCollapsed ? '▶' : '▼';
+        }
+      });
+    };
 
     container.querySelectorAll('.outline-node-title').forEach(el => {
       el.addEventListener('click', () => {
@@ -36,9 +52,13 @@ const OutlinePanel = {
     container.querySelectorAll('.outline-delete').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm('删除此大纲节点？')) return;
-        await api.outline.delete(parseInt(btn.dataset.id));
-        this.refresh();
+        if (!await uiConfirm('删除此大纲节点？', { danger: true, okText: '删除' })) return;
+        try {
+          await api.outline.delete(parseInt(btn.dataset.id));
+          this.refresh();
+        } catch (err) {
+          toast('删除失败: ' + err.message, 'error');
+        }
       });
     });
 

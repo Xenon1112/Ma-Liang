@@ -56,7 +56,7 @@ const InspirationPanel = {
     container.querySelectorAll('.insp-delete').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm('删除此灵感？')) return;
+        if (!await uiConfirm('删除此灵感？', { danger: true, okText: '删除' })) return;
         await api.inspiration.delete(parseInt(btn.dataset.id));
         this.refresh();
       });

@@ -43,7 +43,11 @@ const AppState = {
 
   setTheme(theme) {
     this.theme = theme;
-    document.body.className = `theme-${theme}`;
+    // 只替换 theme-* class，保留 focus-mode 等其他状态 class
+    [...document.body.classList].forEach(c => {
+      if (c.startsWith('theme-')) document.body.classList.remove(c);
+    });
+    document.body.classList.add(`theme-${theme}`);
     this.emit('themeChange', theme);
   },
 
