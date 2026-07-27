@@ -140,6 +140,14 @@ const App = {
       OutlinePanel.refresh();
     });
 
+    // 右侧面板收起/展开（状态存 localStorage，下次启动恢复）
+    document.getElementById('btn-collapse-right').addEventListener('click', () => setRightPanelCollapsed(true));
+    document.getElementById('btn-expand-right').addEventListener('click', () => {
+      setRightPanelCollapsed(false);
+      switchRightTab(AppState.rightPanelTab || 'outline');
+    });
+    if (localStorage.getItem('rightPanelCollapsed') === '1') setRightPanelCollapsed(true);
+
     // 右侧面板标签切换
     document.querySelectorAll('.panel-tab').forEach(tab => {
       tab.addEventListener('click', () => {
@@ -293,15 +301,20 @@ const App = {
 };
 
 // ====== 右侧面板操作 ======
+function setRightPanelCollapsed(collapsed) {
+  document.getElementById('right-panel').classList.toggle('collapsed', collapsed);
+  document.getElementById('right-expand-strip').style.display = collapsed ? '' : 'none';
+  localStorage.setItem('rightPanelCollapsed', collapsed ? '1' : '0');
+}
+
 function toggleRightPanel() {
-  const panel = document.getElementById('right-panel');
-  panel.classList.toggle('collapsed');
+  const collapsed = !document.getElementById('right-panel').classList.contains('collapsed');
+  setRightPanelCollapsed(collapsed);
 }
 
 function switchRightTab(tabName) {
   // 展开面板
-  const panel = document.getElementById('right-panel');
-  panel.classList.remove('collapsed');
+  setRightPanelCollapsed(false);
 
   // 更新标签高亮
   document.querySelectorAll('.panel-tab').forEach(t => {

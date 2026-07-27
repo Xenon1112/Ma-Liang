@@ -20,16 +20,26 @@ const ProjectList = {
             <span>${p.updated_at?.substring(0,10) || ''}</span>
           </div>
           <div class="card-actions">
+            <button class="btn-edit" data-action="edit" data-id="${p.id}">编辑</button>
             <button class="btn-delete" data-action="delete" data-id="${p.id}">删除</button>
           </div>
         </div>`;
     }).join('');
 
-    // 点击卡片打开作品
+    // 点击卡片打开作品（点击操作按钮除外）
     grid.querySelectorAll('.project-card').forEach(card => {
       card.addEventListener('click', (e) => {
-        if (e.target.dataset.action === 'delete') return;
+        if (e.target.dataset.action) return;
         App.openProject(parseInt(card.dataset.id));
+      });
+    });
+
+    // 编辑按钮：修改作品基本信息
+    grid.querySelectorAll('.btn-edit').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const p = projects.find(x => x.id === parseInt(btn.dataset.id));
+        if (p) showEditProjectModal(p);
       });
     });
 
@@ -118,6 +128,67 @@ function showNewProjectModal() {
   overlay.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') overlay.remove();
   });
+}
+
+// ====== 编辑作品弹窗（标题/副标题/笔名/简介/状态）======
+
+function showEditProjectModal(p) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h3>编辑作品信息</h3>
+      <div class="form-group">
+        <label>作品标题 *</label>
+        <input id="edit-project-title" type="text" value="${escAttr(p.title)}" placeholder="输入作品标题">
+      </div>
+      <div class="form-group">
+        <label>副标题</label>
+        <input id="edit-project-subtitle" type="text" value="${escAttr(p.subtitle || '')}" placeholder="副标题（可选）">
+      </div>
+      <div class="form-group">
+        <label>笔名</label>
+        <input id="edit-project-author" type="text" value="${escAttr(p.author || '')}" placeholder="你的笔名">
+      </div>
+      <div class="form-group">
+        <label>简介</label>
+        <textarea id="edit-project-desc" placeholder="写一句简介...">${escHtml(p.description || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label>状态</label>
+        <select id="edit-project-status">
+          <option value="writing" ${p.status === 'writing' ? 'selected' : ''}>写作中</option>
+          <option value="completed" ${p.status === 'completed' ? 'selected' : ''}>已完成</option>
+          <option value="paused" ${p.status === 'paused' ? 'selected' : ''}>暂停</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel">取消</button>
+        <button class="btn-primary" id="btn-save-project">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('.btn-cancel').onclick = () => overlay.remove();
+  overlay.querySelector('#btn-save-project').onclick = async () => {
+    const title = document.getElementById('edit-project-title').value.trim();
+    if (!title) { toast('请输入作品标题', 'error'); return; }
+    await api.project.update(p.id, {
+      title,
+      subtitle: document.getElementById('edit-project-subtitle').value.trim(),
+      author: document.getElementById('edit-project-author').value.trim(),
+      description: document.getElementById('edit-project-desc').value.trim(),
+      status: document.getElementById('edit-project-status').value,
+    });
+    overlay.remove();
+    toast('已保存', 'success');
+    ProjectList.refresh();
+  };
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') overlay.remove(); });
+  overlay.querySelector('#edit-project-title').focus();
 }
 
 function typeBadge(type) {

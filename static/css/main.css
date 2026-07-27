@@ -361,6 +361,38 @@ ul, ol { list-style: none; }
   overflow: hidden;
 }
 
+/* 右侧面板收起/展开按钮与展开条 */
+#btn-collapse-right {
+  width: 28px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  border-left: 1px solid var(--border-color);
+}
+
+#btn-collapse-right:hover { background: var(--bg-hover); }
+
+#right-expand-strip {
+  width: 26px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 6px;
+}
+
+#btn-expand-right {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+#btn-expand-right:hover { background: var(--bg-hover); }
+
 #right-panel .panel-tabs {
   display: flex;
   border-bottom: 1px solid var(--border-color);
@@ -493,6 +525,8 @@ ul, ol { list-style: none; }
 
 .project-card .card-actions .btn-delete { color: var(--danger); }
 .project-card .card-actions .btn-delete:hover { background: var(--danger); color: white; }
+.project-card .card-actions .btn-edit { color: var(--accent); }
+.project-card .card-actions .btn-edit:hover { background: var(--accent); color: white; }
 
 /* ====== New Project Button ====== */
 .btn-new-project {
@@ -637,6 +671,7 @@ ul, ol { list-style: none; }
 body.focus-mode #toolbar,
 body.focus-mode #sidebar,
 body.focus-mode #right-panel,
+body.focus-mode #right-expand-strip,
 body.focus-mode #editor-header,
 body.focus-mode #version-panel { display: none; }
 
