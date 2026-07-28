@@ -9,10 +9,12 @@ const Editor = {
     // 切换前冲刷待触发的自动保存：按快照对旧章节立即保存（此时编辑器还是旧内容）
     await this.flushSave();
 
-    const chapter = await api.chapter.get(chapterId);
+    // 章节信息与当前草稿并行取回
+    const [chapter, draft] = await Promise.all([
+      api.chapter.get(chapterId),
+      api.draft.getCurrent(chapterId, null),
+    ]);
     if (!chapter) return;
-
-    const draft = await api.draft.getCurrent(chapterId, null);
     const textarea = document.getElementById('editor');
     textarea.value = draft ? draft.content : '';
     textarea.disabled = false;
@@ -92,9 +94,9 @@ const Editor = {
       AppState.setDirty(false);
       Editor.updateWordCount();
 
-      // 刷新侧栏字数
-      Sidebar.refresh();
-      VersionPanel.refresh(chId, isPreface ? volId : null);
+      // 局部更新侧栏字数（不重取整棵树）；版本面板收起时不取版本列表
+      if (chId) Sidebar.updateWordCount(chId, result.word_count);
+      if (VersionPanel.expanded) VersionPanel.refresh(chId, isPreface ? volId : null);
       return true;
     } catch (err) {
       console.error('Save failed:', err);

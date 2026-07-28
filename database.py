@@ -61,6 +61,7 @@ def init_db():
         (1, MIGRATION_V1),
         (2, MIGRATION_V2),
         (3, MIGRATION_V3),
+        (4, MIGRATION_V4),
     ]
     for ver, sql in migrations:
         if ver > current:
@@ -320,6 +321,32 @@ CREATE TABLE IF NOT EXISTS element_characters (
 );
 
 CREATE INDEX IF NOT EXISTS idx_element_chars ON element_characters(element_id);
+"""
+
+MIGRATION_V4 = """
+CREATE TABLE IF NOT EXISTS floating_songs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    song_title TEXT NOT NULL DEFAULT '',
+    sort_order REAL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT DEFAULT (datetime('now','localtime')),
+    deleted_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS floating_lyrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    song_id INTEGER NOT NULL REFERENCES floating_songs(id) ON DELETE CASCADE,
+    character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+    character_ids TEXT DEFAULT '[]',
+    content TEXT DEFAULT '',
+    sort_order REAL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    updated_at TEXT DEFAULT (datetime('now','localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_floating_songs_project ON floating_songs(project_id, deleted_at, sort_order);
+CREATE INDEX IF NOT EXISTS idx_floating_lyrics_song ON floating_lyrics(song_id, sort_order);
 """
 
 

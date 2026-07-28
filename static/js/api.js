@@ -31,6 +31,7 @@ const api = {
     update: (id, fields) => api._put(`/api/projects/${id}`, fields),
     delete: (id) => api._delete(`/api/projects/${id}`),
     getStats: (id) => api._get(`/api/projects/${id}/stats`),
+    tree: (id) => api._get(`/api/projects/${id}/tree`),
     // 导入整项目 JSON，body 直接是导出文件解析后的对象，返回新副本
     importProject: (jsonObj) => api._post('/api/projects/import', jsonObj),
   },
@@ -158,6 +159,18 @@ const api = {
     delete: (id) => api._delete(`/api/elements/${id}`),
     reorder: (sceneId, parentId, orderedIds) => api._post('/api/elements/reorder', { sceneId, parentId, orderedIds }),
     move: (elementId, parentId) => api._post(`/api/elements/${elementId}/move`, { parentId }),
+    moveToFloating: (elementId) => api._post(`/api/elements/${elementId}/move-to-floating`),
+  },
+
+  floatingSong: {
+    list: (projectId) => api._get('/api/floating-songs', { projectId }),
+    create: (data) => api._post('/api/floating-songs', data),
+    update: (id, fields) => api._put(`/api/floating-songs/${id}`, fields),
+    delete: (id) => api._delete(`/api/floating-songs/${id}`),
+    addLyric: (songId, data) => api._post(`/api/floating-songs/${songId}/lyrics`, data),
+    updateLyric: (id, fields) => api._put(`/api/floating-lyrics/${id}`, fields),
+    deleteLyric: (id) => api._delete(`/api/floating-lyrics/${id}`),
+    moveToScene: (id, sceneId) => api._post(`/api/floating-songs/${id}/move-to-scene`, { sceneId }),
   },
 
   app: {

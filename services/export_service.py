@@ -94,8 +94,12 @@ def _get_script_contents(project_id):
             ids = [e["character_id"]]
         names = [char_names.get(cid, "") for cid in ids]
         e["character_ids"] = ids
-        e["characterName"] = "、".join(n for n in names if n)
-        if e["element_type"] in ("song", "ensemble") and depth < 4:
+        name_str = "、".join(n for n in names if n)
+        # 齐白：多个角色同说一句对白，标注（齐）
+        if e["element_type"] == "dialogue" and len(ids) > 1 and name_str:
+            name_str += "（齐）"
+        e["characterName"] = name_str
+        if e["element_type"] in ("song", "ensemble", "dual") and depth < 4:
             children = conn.execute(
                 """SELECT * FROM script_elements WHERE parent_id = ? AND deleted_at IS NULL
                    ORDER BY sort_order""", (e["id"],)).fetchall()
@@ -158,6 +162,12 @@ def _format_element_txt(e, indent=""):
         for c in e.get("children", []):
             part = _format_element_txt(c, indent + "    ")
             lines.append(part)
+        return "\n".join(lines)
+    if t == "dual":
+        # 叠白：多人同时说不同的话，逐栏缩进列出
+        lines = [f"{indent}（叠白）"]
+        for c in e.get("children", []):
+            lines.append(_format_element_txt(c, indent + "    "))
         return "\n".join(lines)
     if t == "song":
         lines = [f"{indent}♪ {e['song_title'] or '（未命名歌曲）'}"]
@@ -315,6 +325,23 @@ def export_docx(chapter_id=None, project_id=None, output_path="", options=None):
                     lines = (c["content"] or "").split("\n")
                     for j, line in enumerate(lines):
                         run = style_run(cp.add_run(line), "仿宋")
+                        if j < len(lines) - 1:
+                            run.add_break()
+        elif t == "dual":
+            # 叠白：无边框表格，每个角色一列并排显示（同时对白）
+            p = doc.add_paragraph()
+            style_run(p.add_run("（叠白）"), "黑体", bold=True)
+            children = e.get("children", [])
+            if children:
+                table = doc.add_table(rows=1, cols=len(children))
+                for i, c in enumerate(children):
+                    cp = table.rows[0].cells[i].paragraphs[0]
+                    cname = c.get("characterName") or ""
+                    if cname:
+                        style_run(cp.add_run(cname), "黑体", bold=True, ascii_font="黑体").add_break()
+                    lines = (c["content"] or "").split("\n")
+                    for j, line in enumerate(lines):
+                        run = style_run(cp.add_run(line), ea_body)
                         if j < len(lines) - 1:
                             run.add_break()
         elif t == "song":

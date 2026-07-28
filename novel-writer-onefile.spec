@@ -28,6 +28,7 @@ a = Analysis(
         'services.config_service',
         'services.script_service',
         'services.json_transfer_service',
+        'services.floating_song_service',
     ],
     hookspath=[],
     hooksconfig={},

@@ -10,12 +10,13 @@ const ProjectList = {
     }
     grid.innerHTML = projects.map(p => {
       const typeLabel = typeBadge(p.project_type);
-      const stats = `卷 ? 章 · ? 字`;
       return `
         <div class="project-card" data-id="${p.id}">
           <h3>${escHtml(p.title)} ${typeLabel}</h3>
           <div class="card-desc">${escHtml(p.description || '暂无简介')}</div>
           <div class="card-stats">
+            <span>${p.chapterCount ?? 0} 章</span>
+            <span>${p.totalWords ?? 0} 字</span>
             <span>${p.status === 'writing' ? '写作中' : p.status === 'completed' ? '已完成' : '暂停'}</span>
             <span>${p.updated_at?.substring(0,10) || ''}</span>
           </div>
@@ -55,20 +56,6 @@ const ProjectList = {
         }
       });
     });
-
-    // 加载每个作品的统计
-    for (const p of projects) {
-      const stats = await api.project.getStats(p.id);
-      const card = grid.querySelector(`.project-card[data-id="${p.id}"]`);
-      if (card) {
-        card.querySelector('.card-stats').innerHTML = `
-          <span>${stats.chapterCount} 章</span>
-          <span>${stats.totalWords} 字</span>
-          <span>${p.status === 'writing' ? '写作中' : p.status === 'completed' ? '已完成' : '暂停'}</span>
-          <span>${p.updated_at?.substring(0,10) || ''}</span>
-        `;
-      }
-    }
   },
 };
 

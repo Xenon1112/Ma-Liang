@@ -153,7 +153,7 @@ def set_scene_characters(scene_id, character_ids):
 
 # ====== Script Elements ======
 
-CONTAINER_TYPES = ("song", "ensemble")
+CONTAINER_TYPES = ("song", "ensemble", "dual")
 
 def _attach_characters(conn, elem):
     """给元素附加合唱者列表（character_ids），character_id 保持兼容（取第一个）"""

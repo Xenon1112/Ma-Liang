@@ -8,14 +8,26 @@ const Sidebar = {
     const projectId = AppState.currentProject?.id;
     if (!projectId) return;
 
-    this.volumeData = await api.volume.list(projectId);
-
-    // 加载每个卷的章节
-    for (const vol of this.volumeData) {
-      vol.chapters = await api.chapter.list(vol.id);
-    }
+    // 目录树一次取回（卷+章），替代逐卷请求
+    const tree = await api.project.tree(projectId);
+    this.volumeData = tree?.volumes || [];
 
     this.render();
+  },
+
+  // 保存后局部更新某章字数（不重取数据、不重渲染整棵树）
+  updateWordCount(chapterId, wordCount) {
+    for (const vol of this.volumeData) {
+      const ch = (vol.chapters || []).find(c => c.id === chapterId);
+      if (ch) {
+        ch.word_count = wordCount;
+        const el = document.querySelector(`.tree-node[data-type="chapter"][data-id="${chapterId}"] .node-wordcount`);
+        if (el) el.textContent = wordCount;
+        const volEl = document.querySelector(`.tree-node[data-type="volume"][data-id="${vol.id}"] .node-wordcount`);
+        if (volEl) volEl.textContent = `${getVolWordCount(vol)} 字`;
+        break;
+      }
+    }
   },
 
   render() {

@@ -22,7 +22,7 @@ from database import init_db, get_db_path, get_user_data_dir, soft_delete, get_c
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-from services.project_service import list_projects, get_project, create_project, update_project, delete_project, get_stats
+from services.project_service import list_projects, get_project, create_project, update_project, delete_project, get_stats, get_project_tree
 from services.chapter_service import (
     list_volumes, get_volume, create_volume, update_volume, reorder_volumes,
     list_chapters, get_chapter, create_chapter, update_chapter, reorder_chapters,
@@ -48,6 +48,10 @@ from services.script_service import (
     list_acts, get_act, create_act, update_act, reorder_acts,
     list_scenes, get_scene, create_scene, update_scene, reorder_scenes, set_scene_characters,
     list_elements, get_element, create_element, update_element, delete_element, reorder_elements, move_element,
+)
+from services.floating_song_service import (
+    list_floating_songs, create_floating_song, update_floating_song, delete_floating_song,
+    add_lyric, update_lyric, delete_lyric, move_to_scene, move_to_floating,
 )
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static", template_folder=TEMPLATES_DIR)
@@ -193,6 +197,13 @@ def api_delete_project(id):
 @app.route("/api/projects/<int:id>/stats", methods=["GET"])
 def api_get_stats(id):
     return jsonify(get_stats(id))
+
+
+@app.route("/api/projects/<int:id>/tree", methods=["GET"])
+def api_project_tree(id):
+    # 目录树（卷+章 或 幕+场）一次取回，替代前端 1+N 逐级请求
+    t = get_project_tree(id)
+    return jsonify(t) if t else (jsonify({"error": "not found"}), 404)
 
 @app.route("/api/projects/import", methods=["POST"])
 def api_import_project():
@@ -730,6 +741,49 @@ def api_move_element(id):
     data = req_json()
     move_element(id, data.get("parentId"))
     return jsonify({"ok": True})
+
+
+# ====== Floating Song API（游离歌曲，仅音乐剧） ======
+
+@app.route("/api/floating-songs", methods=["GET"])
+def api_list_floating_songs():
+    return jsonify(list_floating_songs(request.args.get("projectId", type=int)))
+
+@app.route("/api/floating-songs", methods=["POST"])
+def api_create_floating_song():
+    return jsonify(create_floating_song(snake_json())), 201
+
+@app.route("/api/floating-songs/<int:id>", methods=["PUT"])
+def api_update_floating_song(id):
+    return jsonify(update_floating_song(id, snake_json()))
+
+@app.route("/api/floating-songs/<int:id>", methods=["DELETE"])
+def api_delete_floating_song(id):
+    delete_floating_song(id)
+    return jsonify({"ok": True})
+
+@app.route("/api/floating-songs/<int:id>/lyrics", methods=["POST"])
+def api_add_lyric(id):
+    data = snake_json()
+    data["song_id"] = id
+    return jsonify(add_lyric(data)), 201
+
+@app.route("/api/floating-lyrics/<int:id>", methods=["PUT"])
+def api_update_lyric(id):
+    return jsonify(update_lyric(id, snake_json()))
+
+@app.route("/api/floating-lyrics/<int:id>", methods=["DELETE"])
+def api_delete_lyric(id):
+    delete_lyric(id)
+    return jsonify({"ok": True})
+
+@app.route("/api/floating-songs/<int:id>/move-to-scene", methods=["POST"])
+def api_move_to_scene(id):
+    return jsonify(move_to_scene(id, req_json().get("sceneId")))
+
+@app.route("/api/elements/<int:id>/move-to-floating", methods=["POST"])
+def api_move_to_floating(id):
+    return jsonify(move_to_floating(id))
 
 
 # ====== Main ======

@@ -2,9 +2,58 @@ from database import get_conn, row_to_dict
 
 def list_projects():
     conn = get_conn()
-    rows = conn.execute("SELECT * FROM projects WHERE deleted_at IS NULL ORDER BY updated_at DESC").fetchall()
+    # 内联统计（章数/总字数，口径同 get_stats：章、卷均未软删），避免首页逐作品再发请求
+    rows = conn.execute("""
+        SELECT p.*,
+            (SELECT COALESCE(SUM(c.word_count), 0) FROM chapters c JOIN volumes v ON c.volume_id = v.id
+             WHERE c.project_id = p.id AND c.deleted_at IS NULL AND v.deleted_at IS NULL) AS total_words,
+            (SELECT COUNT(*) FROM chapters c JOIN volumes v ON c.volume_id = v.id
+             WHERE c.project_id = p.id AND c.deleted_at IS NULL AND v.deleted_at IS NULL) AS chapter_count
+        FROM projects p WHERE p.deleted_at IS NULL ORDER BY p.updated_at DESC
+    """).fetchall()
     conn.close()
-    return [row_to_dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = row_to_dict(r)
+        d["totalWords"] = d.pop("total_words")
+        d["chapterCount"] = d.pop("chapter_count")
+        result.append(d)
+    return result
+
+def get_project_tree(project_id):
+    """一次取回目录树：novel → 卷(含章节)；剧本 → 幕(含场)。替代前端 1+N 逐级请求"""
+    conn = get_conn()
+    proj = conn.execute("SELECT project_type FROM projects WHERE id = ? AND deleted_at IS NULL", (project_id,)).fetchone()
+    if not proj:
+        conn.close()
+        return None
+    ptype = proj["project_type"] or "novel"
+    if ptype == "novel":
+        parents = conn.execute(
+            "SELECT * FROM volumes WHERE project_id = ? AND deleted_at IS NULL ORDER BY sort_order", (project_id,)).fetchall()
+        children = conn.execute(
+            """SELECT c.* FROM chapters c JOIN volumes v ON c.volume_id = v.id
+               WHERE c.project_id = ? AND c.deleted_at IS NULL AND v.deleted_at IS NULL
+               ORDER BY c.sort_order""", (project_id,)).fetchall()
+        key, pid_field, child_key = "volumes", "volume_id", "chapters"
+    else:
+        parents = conn.execute(
+            "SELECT * FROM acts WHERE project_id = ? AND deleted_at IS NULL ORDER BY sort_order", (project_id,)).fetchall()
+        children = conn.execute(
+            """SELECT s.* FROM scenes s JOIN acts a ON s.act_id = a.id
+               WHERE s.project_id = ? AND s.deleted_at IS NULL AND a.deleted_at IS NULL
+               ORDER BY s.sort_order""", (project_id,)).fetchall()
+        key, pid_field, child_key = "acts", "act_id", "scenes"
+    by_parent = {}
+    for ch in children:
+        by_parent.setdefault(ch[pid_field], []).append(row_to_dict(ch))
+    result = []
+    for p in parents:
+        d = row_to_dict(p)
+        d[child_key] = by_parent.get(p["id"], [])
+        result.append(d)
+    conn.close()
+    return {"type": ptype, key: result}
 
 def get_project(id):
     conn = get_conn()

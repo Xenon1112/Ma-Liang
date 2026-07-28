@@ -225,6 +225,7 @@ const App = {
       document.getElementById('btn-add-chapter').title = '新建场';
       await ScriptSidebar.refresh();
       CardEditor.clear();
+      FloatingSongEditor.clear();
     } else {
       document.getElementById('btn-add-volume').textContent = '📁+';
       document.getElementById('btn-add-volume').title = '新建卷';

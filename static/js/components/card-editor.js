@@ -99,6 +99,7 @@ const CardEditor = {
     const types = [
       { type: 'action', label: '🎬 动作', icon: '🎬' },
       { type: 'dialogue', label: '💬 对白', icon: '💬' },
+      { type: 'dual', label: '🗣 叠白', icon: '🗣' },
     ];
     if (isMusical) {
       types.push({ type: 'song', label: '🎵 歌曲', icon: '🎵' });
@@ -132,14 +133,16 @@ const CardEditor = {
       song: { icon: '🎵', label: '歌曲', bg: '#e8f0fe', border: '#90b8f8' },
       lyric: { icon: '🎤', label: '唱词', bg: '#f3e8ff', border: '#c4a0f0' },
       ensemble: { icon: '🎼', label: '重唱', bg: '#fff3e0', border: '#f0c080' },
+      dual: { icon: '🗣', label: '叠白', bg: '#e6f4ea', border: '#7bc8a4' },
     };
     const cfg = typeConfig[elem.element_type] || typeConfig.action;
-    const charName = elem.element_type === 'lyric'
+    const charName = (elem.element_type === 'lyric' || elem.element_type === 'dialogue')
       ? (elem.character_ids || []).map(id => this.characterList.find(c => c.id === id)?.name).filter(Boolean).join('、')
       : (elem.character_id ? (this.characterList.find(c => c.id === elem.character_id)?.name || '') : '');
     const isSongContainer = elem.element_type === 'song';
     const isEnsemble = elem.element_type === 'ensemble';
-    const isContainer = isSongContainer || isEnsemble;
+    const isDual = elem.element_type === 'dual';
+    const isContainer = isSongContainer || isEnsemble || isDual;
     const marginLeft = depth * 24;
 
     let html = '';
@@ -152,15 +155,22 @@ const CardEditor = {
         <option value="dialogue" ${elem.element_type==='dialogue'?'selected':''}>💬 对白</option>
         ${isMusical ? `<option value="song" ${elem.element_type==='song'?'selected':''}>🎵 歌曲</option>` : ''}
         ${isContainer || elem.element_type==='lyric' ? `<option value="lyric" ${elem.element_type==='lyric'?'selected':''}>🎤 唱词</option>` : ''}
+        ${depth === 0 ? `<option value="dual" ${elem.element_type==='dual'?'selected':''}>🗣 叠白</option>` : ''}
       </select>`;
 
-    // 角色选择：对白/动作单选下拉；唱词多选按钮（合唱）
+    // 角色选择：对白/动作单选下拉（对白可选多人齐白）；唱词多选按钮（合唱）
     if (elem.element_type === 'dialogue' || elem.element_type === 'action') {
-      html += `<select class="card-char-select" data-index="${index}" style="border:none;background:transparent;font-size:12px;min-width:80px;">
+      if (elem.element_type === 'dialogue' && (elem.character_ids || []).length > 1) {
+        // 齐白：多个角色同说这句台词
+        html += `<button class="card-chars-btn" data-index="${index}" title="齐白：多人同时说这句" style="border:1px dashed var(--border-color);background:transparent;font-size:12px;padding:2px 8px;border-radius:4px;cursor:pointer;">${escHtml(charName)}（齐） ▾</button>`;
+      } else {
+        html += `<select class="card-char-select" data-index="${index}" style="border:none;background:transparent;font-size:12px;min-width:80px;">
         <option value="">选择角色</option>
         ${this.characterList.map(c => `<option value="${c.id}" ${c.id===elem.character_id?'selected':''}>${escHtml(c.name)}</option>`).join('')}
         <option value="__new__" style="color:var(--accent);">+ 新建角色</option>
+        ${elem.element_type === 'dialogue' ? '<option value="__multi__" style="color:var(--accent);">👥 齐白（多人同说）…</option>' : ''}
       </select>`;
+      }
     } else if (elem.element_type === 'lyric') {
       html += `<button class="card-chars-btn" data-index="${index}" title="选择合唱角色" style="border:1px dashed var(--border-color);background:transparent;font-size:12px;padding:2px 8px;border-radius:4px;cursor:pointer;">${escHtml(charName) || '选择角色'} ▾</button>`;
     }
@@ -168,10 +178,18 @@ const CardEditor = {
     // 歌曲标题（仅歌曲容器）
     if (isSongContainer) {
       html += `<input class="card-song-title" data-index="${index}" value="${escAttr(elem.song_title || '')}" placeholder="歌曲名" style="flex:1;border:none;background:transparent;font-size:13px;font-weight:bold;">`;
+      // 转为游离歌曲（仅顶层歌曲）
+      if (depth === 0) {
+        html += `<button class="card-to-floating" data-index="${index}" title="转为游离歌曲（移出正文，仅保留在 JSON 导出）" style="font-size:12px;padding:1px 4px;border:1px dashed var(--border-color);border-radius:4px;color:var(--text-secondary);">⇱ 游离</button>`;
+      }
     }
     // 重唱标识
     if (isEnsemble) {
       html += `<span style="font-size:13px;font-weight:bold;color:#c8801a;">🎼 重唱（多人同时唱不同的词）</span>`;
+    }
+    // 叠白标识
+    if (isDual) {
+      html += `<span style="font-size:13px;font-weight:bold;color:#2e7d32;">🗣 叠白（多人同时说不同的话）</span>`;
     }
 
     html += `<span style="flex:1;"></span>`;
@@ -191,10 +209,14 @@ const CardEditor = {
       }
       // 容器内添加按钮
       html += `<div style="margin-left:${(depth+1)*24}px;margin-bottom:8px;text-align:center;">`;
-      html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="lyric" style="margin:2px;padding:4px 10px;border:1px dashed var(--border-color);border-radius:4px;font-size:11px;">+ 🎤 唱词</button>`;
-      if (isSongContainer) {
-        html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="dialogue" style="margin:2px;padding:4px 10px;border:1px dashed var(--border-color);border-radius:4px;font-size:11px;">+ 💬 歌中对白</button>`;
-        html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="ensemble" style="margin:2px;padding:4px 10px;border:1px dashed #f0c080;border-radius:4px;font-size:11px;">+ 🎼 重唱</button>`;
+      if (isDual) {
+        html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="dialogue" style="margin:2px;padding:4px 10px;border:1px dashed #7bc8a4;border-radius:4px;font-size:11px;">+ 💬 对白</button>`;
+      } else {
+        html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="lyric" style="margin:2px;padding:4px 10px;border:1px dashed var(--border-color);border-radius:4px;font-size:11px;">+ 🎤 唱词</button>`;
+        if (isSongContainer) {
+          html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="dialogue" style="margin:2px;padding:4px 10px;border:1px dashed var(--border-color);border-radius:4px;font-size:11px;">+ 💬 歌中对白</button>`;
+          html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="ensemble" style="margin:2px;padding:4px 10px;border:1px dashed #f0c080;border-radius:4px;font-size:11px;">+ 🎼 重唱</button>`;
+        }
       }
       html += `</div>`;
     }
@@ -280,28 +302,39 @@ const CardEditor = {
     wrap.querySelectorAll('.card-char-select').forEach(sel => {
       sel.addEventListener('change', async () => {
         const idx = parseInt(sel.dataset.index);
+        const card = this.getCard(idx);
+        if (!card) return;
         if (sel.value === '__new__') {
           // 新建角色
           sel.value = ''; // reset
           const name = await uiPrompt('新建角色名称:');
-          if (!name) return;
+          if (!name) { this.render(); return; }
           const projectId = AppState.currentProject?.id;
           const newChar = await api.character.create({ projectId, name });
           this.characterList.push(newChar);
-          const card = this.getCard(idx);
-          if (card) {
-            card.character_id = newChar.id;
-            await api.element.update(card.id, { character_id: newChar.id });
-          }
+          card.character_id = newChar.id;
+          card.character_ids = [newChar.id];
+          await api.element.update(card.id, { character_id: newChar.id, characterIds: [newChar.id] });
           this.render();
           return;
         }
-        const card = this.getCard(idx);
-        if (card) {
-          const cid = sel.value ? parseInt(sel.value) : null;
-          card.character_id = cid;
-          await api.element.update(card.id, { character_id: cid });
+        if (sel.value === '__multi__') {
+          // 齐白：多选角色同说这句台词
+          const options = this.characterList.map(c => ({ id: c.id, label: c.name }));
+          const cur = (card.character_ids && card.character_ids.length) ? card.character_ids : (card.character_id ? [card.character_id] : []);
+          const ids = await uiChecklist('齐白：选择同说这句台词的角色', options, cur);
+          if (ids === null) { this.render(); return; }
+          card.character_ids = ids;
+          card.character_id = ids[0] || null;
+          await api.element.update(card.id, { characterIds: ids });
+          this.render();
+          return;
         }
+        // 单选：同步清掉齐白的多角色记录
+        const cid = sel.value ? parseInt(sel.value) : null;
+        card.character_id = cid;
+        card.character_ids = cid ? [cid] : [];
+        await api.element.update(card.id, { character_id: cid, characterIds: cid ? [cid] : [] });
       });
     });
 
@@ -314,6 +347,23 @@ const CardEditor = {
           const title = inp.value.trim();
           card.song_title = title;
           await api.element.update(card.id, { song_title: title });
+        }
+      });
+    });
+
+    // 歌曲转游离歌曲（移出正文，仅保留在 JSON 导出）
+    wrap.querySelectorAll('.card-to-floating').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const card = this.getCard(parseInt(btn.dataset.index));
+        if (!card) return;
+        if (!await uiConfirm('将此歌曲转为游离歌曲？将从正文移除（唱词保留，仅出现在 JSON 导出）。', { okText: '转换' })) return;
+        try {
+          await api.element.moveToFloating(card.id);
+          toast('已转为游离歌曲');
+          await this.loadScene(this.currentSceneId);
+          ScriptSidebar.refresh();
+        } catch (err) {
+          toast('转换失败: ' + err.message, 'error');
         }
       });
     });

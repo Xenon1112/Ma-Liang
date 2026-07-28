@@ -131,6 +131,26 @@ def _build_export_payload(conn, project_id, include_deleted=False):
                                      if r["element_id"] in elem_ids and r["character_id"] in char_ids]
 
     payload["script_config"] = _fetch_all(conn, "SELECT * FROM script_config WHERE project_id = ?", pid)
+
+    # 游离歌曲（独立顶层键、嵌套结构；不进正文/TXT/DOCX，仅音乐剧有数据）
+    from services.floating_song_service import _parse_ids
+    floating = []
+    fs_rows = _fetch_all(conn, f"SELECT * FROM floating_songs WHERE project_id = ?{nd} ORDER BY sort_order", pid)
+    for s in fs_rows:
+        lyrics = _fetch_all(conn,
+            "SELECT content, character_ids, sort_order FROM floating_lyrics WHERE song_id = ? ORDER BY sort_order",
+            (s["id"],))
+        floating.append({
+            "song_title": s["song_title"],
+            "sort_order": s["sort_order"],
+            "lyrics": [{
+                "content": l["content"],
+                # 过滤指向已排除角色的悬空引用
+                "character_ids": [i for i in _parse_ids(l["character_ids"]) if i in char_ids],
+                "sort_order": l["sort_order"],
+            } for l in lyrics],
+        })
+    payload["floating_songs"] = floating
     return payload
 
 
@@ -266,6 +286,20 @@ def import_project_json(payload):
         for row in _rows(payload, "script_config"):
             conn.execute("INSERT INTO script_config (project_id, script_type) VALUES (?, ?)",
                          (new_project_id, row.get("script_type", "play")))
+        # 游离歌曲（独立键；老导出文件无此键时视为空）
+        for s in _rows(payload, "floating_songs"):
+            if not isinstance(s, dict):
+                raise ValueError("导出文件格式不正确：floating_songs 存在非法行")
+            cur = conn.execute(
+                "INSERT INTO floating_songs (project_id, song_title, sort_order) VALUES (?, ?, ?)",
+                (new_project_id, s.get("song_title") or "未命名歌曲", s.get("sort_order", 0)))
+            for l in (s.get("lyrics") or []):
+                # 演唱者 id 重映射到新角色；悬空引用丢弃
+                ids = [hmap[i] for i in (l.get("character_ids") or []) if i in hmap]
+                conn.execute(
+                    "INSERT INTO floating_lyrics (song_id, character_id, character_ids, content, sort_order) VALUES (?, ?, ?, ?, ?)",
+                    (cur.lastrowid, ids[0] if ids else None,
+                     json.dumps(ids, ensure_ascii=False), l.get("content", ""), l.get("sort_order", 0)))
         conn.commit()
         return row_to_dict(conn.execute(
             "SELECT * FROM projects WHERE id = ?", (new_project_id,)).fetchone())
