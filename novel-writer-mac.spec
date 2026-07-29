@@ -79,8 +79,8 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': '马良',
         'CFBundleDisplayName': '马良',
-        'CFBundleVersion': '0.0.1',
-        'CFBundleShortVersionString': '0.0.1',
+        'CFBundleVersion': '0.0.2',
+        'CFBundleShortVersionString': '0.0.2',
         'LSMinimumSystemVersion': '26.0',
         'NSHighResolutionCapable': True,
     },
