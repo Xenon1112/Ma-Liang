@@ -1,6 +1,6 @@
 [project]
 name = "novel-writer"
-version = "0.0.1"
+version = "0.0.2.dev0"
 description = "马良 - 小说/剧本写作桌面工具（Flask + SQLite）"
 license = "MIT"
 requires-python = ">=3.10"
