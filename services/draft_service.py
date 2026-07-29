@@ -180,6 +180,14 @@ def delete_draft(draft_id):
                 (row["volume_id"],)).fetchone()
         if nxt:
             conn.execute("UPDATE drafts SET is_current = 1 WHERE id = ?", (nxt["id"],))
+            # 同步章节字数到新 current，避免列表/目录树字数与编辑器内容不符
+            if row["chapter_id"]:
+                conn.execute(
+                    "UPDATE chapters SET word_count = (SELECT word_count FROM drafts WHERE id = ?) WHERE id = ?",
+                    (nxt["id"], row["chapter_id"]))
+        elif row["chapter_id"]:
+            # 草稿删光，章节字数归零
+            conn.execute("UPDATE chapters SET word_count = 0 WHERE id = ?", (row["chapter_id"],))
     conn.commit()
     conn.close()
 

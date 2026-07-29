@@ -60,20 +60,25 @@ def _require_deleted(conn, table, id):
 
 def restore(entity_type, id):
     conn = get_conn()
-    table = ENTITY_TABLES.get(entity_type)
-    if table:
-        _require_deleted(conn, table, id)
-        restore_soft_delete(conn, table, id)
-    conn.close()
+    try:
+        table = ENTITY_TABLES.get(entity_type)
+        if table:
+            # _require_deleted 可能抛 ValueError，finally 保证连接关闭（否则 Windows 上泄漏的连接会锁定 WAL 文件）
+            _require_deleted(conn, table, id)
+            restore_soft_delete(conn, table, id)
+    finally:
+        conn.close()
 
 def permanently_delete(entity_type, id):
     conn = get_conn()
-    table = ENTITY_TABLES.get(entity_type)
-    if table:
-        _require_deleted(conn, table, id)
-        conn.execute(f"DELETE FROM {table} WHERE id = ?", (id,))
-        conn.commit()
-    conn.close()
+    try:
+        table = ENTITY_TABLES.get(entity_type)
+        if table:
+            _require_deleted(conn, table, id)
+            conn.execute(f"DELETE FROM {table} WHERE id = ?", (id,))
+            conn.commit()
+    finally:
+        conn.close()
 
 def clean_expired():
     conn = get_conn()
