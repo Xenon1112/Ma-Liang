@@ -102,9 +102,9 @@ def _build_export_payload(conn, project_id, include_deleted=False):
     scene_ids = {r["id"] for r in scenes}
     payload["scenes"] = scenes
 
-    elements = _fetch_all(conn, """
+    elements = _fetch_all(conn, f"""
         SELECT * FROM script_elements WHERE scene_id IN
-            (SELECT id FROM scenes WHERE project_id = ?)
+            (SELECT id FROM scenes WHERE project_id = ?){nd}
     """, pid)
     elements = [r for r in elements if r["scene_id"] in scene_ids]
     elem_ids = {r["id"] for r in elements}
@@ -132,18 +132,23 @@ def _build_export_payload(conn, project_id, include_deleted=False):
 
     payload["script_config"] = _fetch_all(conn, "SELECT * FROM script_config WHERE project_id = ?", pid)
 
-    # 游离歌曲（独立顶层键、嵌套结构；不进正文/TXT/DOCX，仅音乐剧有数据）
+    # 游离歌曲（独立顶层键；lyrics 为扁平结构，parent_id 引用同歌内其他行的 id；
+    # 不进正文/TXT/DOCX，仅音乐剧有数据）
     from services.floating_song_service import _parse_ids
     floating = []
     fs_rows = _fetch_all(conn, f"SELECT * FROM floating_songs WHERE project_id = ?{nd} ORDER BY sort_order", pid)
     for s in fs_rows:
         lyrics = _fetch_all(conn,
-            "SELECT content, character_ids, sort_order FROM floating_lyrics WHERE song_id = ? ORDER BY sort_order",
+            "SELECT id, parent_id, element_type, content, character_ids, sort_order FROM floating_lyrics WHERE song_id = ? ORDER BY sort_order, id",
             (s["id"],))
         floating.append({
             "song_title": s["song_title"],
             "sort_order": s["sort_order"],
             "lyrics": [{
+                # 保留原行 id 供同歌内 parent_id 引用
+                "id": l["id"],
+                "parent_id": l["parent_id"],
+                "element_type": l["element_type"] or "lyric",
                 "content": l["content"],
                 # 过滤指向已排除角色的悬空引用
                 "character_ids": [i for i in _parse_ids(l["character_ids"]) if i in char_ids],
@@ -293,13 +298,24 @@ def import_project_json(payload):
             cur = conn.execute(
                 "INSERT INTO floating_songs (project_id, song_title, sort_order) VALUES (?, ?, ?)",
                 (new_project_id, s.get("song_title") or "未命名歌曲", s.get("sort_order", 0)))
+            # 先插全部行（parent_id 暂置 NULL）并建立 旧id→新id 映射，再统一回写 parent_id
+            lyric_map = {}
+            pending_parent = []
             for l in (s.get("lyrics") or []):
                 # 演唱者 id 重映射到新角色；悬空引用丢弃
                 ids = [hmap[i] for i in (l.get("character_ids") or []) if i in hmap]
-                conn.execute(
-                    "INSERT INTO floating_lyrics (song_id, character_id, character_ids, content, sort_order) VALUES (?, ?, ?, ?, ?)",
-                    (cur.lastrowid, ids[0] if ids else None,
+                lcur = conn.execute(
+                    "INSERT INTO floating_lyrics (song_id, element_type, character_id, character_ids, content, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+                    (cur.lastrowid, l.get("element_type") or "lyric", ids[0] if ids else None,
                      json.dumps(ids, ensure_ascii=False), l.get("content", ""), l.get("sort_order", 0)))
+                if l.get("id") is not None:
+                    lyric_map[l["id"]] = lcur.lastrowid
+                if l.get("parent_id") is not None:
+                    pending_parent.append((lcur.lastrowid, l["parent_id"]))
+            for new_id, old_parent in pending_parent:
+                # 悬空 parent_id（父行未导出）置 NULL，退回顶层
+                conn.execute("UPDATE floating_lyrics SET parent_id = ? WHERE id = ?",
+                             (lyric_map.get(old_parent), new_id))
         conn.commit()
         return row_to_dict(conn.execute(
             "SELECT * FROM projects WHERE id = ?", (new_project_id,)).fetchone())

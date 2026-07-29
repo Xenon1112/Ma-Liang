@@ -62,6 +62,7 @@ def init_db():
         (2, MIGRATION_V2),
         (3, MIGRATION_V3),
         (4, MIGRATION_V4),
+        (5, MIGRATION_V5),
     ]
     for ver, sql in migrations:
         if ver > current:
@@ -347,6 +348,13 @@ CREATE TABLE IF NOT EXISTS floating_lyrics (
 
 CREATE INDEX IF NOT EXISTS idx_floating_songs_project ON floating_songs(project_id, deleted_at, sort_order);
 CREATE INDEX IF NOT EXISTS idx_floating_lyrics_song ON floating_lyrics(song_id, sort_order);
+"""
+
+MIGRATION_V5 = """
+-- 游离歌曲支持歌中对白与重唱：element_type（lyric/dialogue/ensemble）+ parent_id（ensemble 容器嵌套）
+ALTER TABLE floating_lyrics ADD COLUMN element_type TEXT DEFAULT 'lyric';
+ALTER TABLE floating_lyrics ADD COLUMN parent_id INTEGER REFERENCES floating_lyrics(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_floating_lyrics_parent ON floating_lyrics(song_id, parent_id, sort_order);
 """
 
 

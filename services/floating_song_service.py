@@ -16,15 +16,35 @@ def _lyric_to_dict(row):
     d["character_ids"] = _parse_ids(d.get("character_ids"))
     return d
 
+def _load_lyric_children(conn, parent_id, depth=0):
+    """递归加载 ensemble 容器的子行（参照剧本元素，限制嵌套深度）"""
+    rows = conn.execute(
+        "SELECT * FROM floating_lyrics WHERE parent_id = ? ORDER BY sort_order", (parent_id,)).fetchall()
+    children = []
+    for r in rows:
+        child = _lyric_to_dict(r)
+        if child.get("element_type") == "ensemble" and depth < 4:
+            child["children"] = _load_lyric_children(conn, child["id"], depth + 1)
+        children.append(child)
+    return children
+
 def list_floating_songs(project_id):
-    """歌曲 + 嵌套唱词（character_ids 已解析为数组）"""
+    """歌曲 + 嵌套元素树（顶层 lyrics 为 parent_id 为空的行，ensemble 行带 children）"""
     conn = get_conn()
     songs = [row_to_dict(r) for r in conn.execute(
         "SELECT * FROM floating_songs WHERE project_id = ? AND deleted_at IS NULL ORDER BY sort_order",
         (project_id,)).fetchall()]
     for s in songs:
-        s["lyrics"] = [_lyric_to_dict(r) for r in conn.execute(
-            "SELECT * FROM floating_lyrics WHERE song_id = ? ORDER BY sort_order", (s["id"],)).fetchall()]
+        top = conn.execute(
+            "SELECT * FROM floating_lyrics WHERE song_id = ? AND parent_id IS NULL ORDER BY sort_order",
+            (s["id"],)).fetchall()
+        lyrics = []
+        for r in top:
+            d = _lyric_to_dict(r)
+            if d.get("element_type") == "ensemble":
+                d["children"] = _load_lyric_children(conn, d["id"])
+            lyrics.append(d)
+        s["lyrics"] = lyrics
     conn.close()
     return songs
 
@@ -62,12 +82,20 @@ def delete_floating_song(id):
 def add_lyric(data):
     conn = get_conn()
     song_id = data["song_id"]
-    order = next_sort_order(conn, "floating_lyrics", "song_id", song_id)
+    parent_id = data.get("parent_id")
+    element_type = data.get("element_type") or "lyric"
+    # ensemble 子行在容器内排序，顶层行在歌曲内排序
+    if parent_id:
+        order = next_sort_order(conn, "floating_lyrics", "parent_id", parent_id)
+    else:
+        order = next_sort_order(conn, "floating_lyrics", "song_id", song_id)
     character_ids = [int(i) for i in (data.get("character_ids") or [])]
+    # ensemble 是容器行，本身无内容
+    content = "" if element_type == "ensemble" else data.get("content", "")
     cur = conn.execute(
-        "INSERT INTO floating_lyrics (song_id, character_id, character_ids, content, sort_order) VALUES (?, ?, ?, ?, ?)",
-        (song_id, character_ids[0] if character_ids else None,
-         json.dumps(character_ids, ensure_ascii=False), data.get("content", ""), order))
+        "INSERT INTO floating_lyrics (song_id, parent_id, element_type, character_id, character_ids, content, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (song_id, parent_id, element_type, character_ids[0] if character_ids else None,
+         json.dumps(character_ids, ensure_ascii=False), content, order))
     conn.commit()
     row = conn.execute("SELECT * FROM floating_lyrics WHERE id = ?", (cur.lastrowid,)).fetchone()
     conn.close()
@@ -92,6 +120,7 @@ def update_lyric(id, data):
     return _lyric_to_dict(row)
 
 def delete_lyric(id):
+    # ensemble 行的子行由 parent_id 外键级联删除（ON DELETE CASCADE）
     conn = get_conn()
     conn.execute("DELETE FROM floating_lyrics WHERE id = ?", (id,))
     conn.commit()
@@ -100,7 +129,8 @@ def delete_lyric(id):
 # ====== 与正文歌曲互转 ======
 
 def move_to_scene(floating_song_id, scene_id):
-    """游离歌曲 → 正文歌曲：在目标场建 song 容器 + lyric 子元素，然后删除游离歌曲"""
+    """游离歌曲 → 正文歌曲：在目标场建 song 容器，按元素类型重建
+    lyric/dialogue 子元素与 ensemble 容器（含其子元素），然后删除游离歌曲"""
     from services.script_service import create_element
     conn = get_conn()
     song = conn.execute(
@@ -108,23 +138,54 @@ def move_to_scene(floating_song_id, scene_id):
     if not song:
         conn.close()
         raise ValueError("游离歌曲不存在")
-    lyrics = conn.execute(
-        "SELECT * FROM floating_lyrics WHERE song_id = ? ORDER BY sort_order", (floating_song_id,)).fetchall()
+    top = conn.execute(
+        "SELECT * FROM floating_lyrics WHERE song_id = ? AND parent_id IS NULL ORDER BY sort_order",
+        (floating_song_id,)).fetchall()
+    children_map = {}
+    for l in top:
+        if l["element_type"] == "ensemble":
+            children_map[l["id"]] = conn.execute(
+                "SELECT * FROM floating_lyrics WHERE parent_id = ? ORDER BY sort_order", (l["id"],)).fetchall()
     conn.close()
 
     new_song = create_element({
         "scene_id": scene_id, "element_type": "song", "song_title": song["song_title"],
     })
-    for l in lyrics:
-        create_element({
-            "scene_id": scene_id, "parent_id": new_song["id"], "element_type": "lyric",
-            "content": l["content"], "character_ids": _parse_ids(l["character_ids"]),
-        })
+    for l in top:
+        ids = _parse_ids(l["character_ids"])
+        if l["element_type"] == "ensemble":
+            ens = create_element({
+                "scene_id": scene_id, "parent_id": new_song["id"], "element_type": "ensemble",
+            })
+            for ch in children_map.get(l["id"], []):
+                create_element({
+                    "scene_id": scene_id, "parent_id": ens["id"],
+                    "element_type": ch["element_type"] if ch["element_type"] in ("lyric", "dialogue") else "lyric",
+                    "content": ch["content"], "character_ids": _parse_ids(ch["character_ids"]),
+                })
+        else:
+            create_element({
+                "scene_id": scene_id, "parent_id": new_song["id"],
+                "element_type": l["element_type"] if l["element_type"] in ("lyric", "dialogue") else "lyric",
+                "content": l["content"], "character_ids": ids,
+            })
     delete_floating_song(floating_song_id)
     return new_song
 
+def _element_singers(conn, element_id):
+    """元素的演唱/说话角色列表：优先 element_characters，否则退回单 character_id"""
+    rows = conn.execute(
+        "SELECT character_id FROM element_characters WHERE element_id = ? ORDER BY sort_order, id",
+        (element_id,)).fetchall()
+    ids = [r["character_id"] for r in rows]
+    if not ids:
+        row = conn.execute("SELECT character_id FROM script_elements WHERE id = ?", (element_id,)).fetchone()
+        if row and row["character_id"]:
+            ids = [row["character_id"]]
+    return ids
+
 def move_to_floating(element_id):
-    """正文歌曲 → 游离歌曲：仅接受子元素全为唱词的歌曲（含对白/重唱则拒绝，避免结构丢失）"""
+    """正文歌曲 → 游离歌曲：完整转换 lyric/dialogue/ensemble（ensemble 容器连带其子元素）"""
     conn = get_conn()
     song = conn.execute(
         "SELECT * FROM script_elements WHERE id = ? AND deleted_at IS NULL", (element_id,)).fetchone()
@@ -134,17 +195,21 @@ def move_to_floating(element_id):
     children = conn.execute(
         "SELECT * FROM script_elements WHERE parent_id = ? AND deleted_at IS NULL ORDER BY sort_order",
         (element_id,)).fetchall()
-    if any(ch["element_type"] != "lyric" for ch in children):
+    supported = ("lyric", "dialogue", "ensemble")
+    if any(ch["element_type"] not in supported for ch in children):
         conn.close()
-        raise ValueError("歌曲含对白或重唱，不能转为游离歌曲")
-    child_ids = [ch["id"] for ch in children]
-    singers = {}
-    for cid in child_ids:
-        rows = conn.execute(
-            "SELECT character_id FROM element_characters WHERE element_id = ? ORDER BY sort_order, id",
-            (cid,)).fetchall()
-        ids = [r["character_id"] for r in rows]
-        singers[cid] = ids
+        raise ValueError("歌曲含暂不支持的元素类型，不能转为游离歌曲")
+    # 收集顶层元素及 ensemble 子元素的演唱者
+    singers = {ch["id"]: _element_singers(conn, ch["id"]) for ch in children}
+    ens_children = {}
+    for ch in children:
+        if ch["element_type"] == "ensemble":
+            subs = conn.execute(
+                "SELECT * FROM script_elements WHERE parent_id = ? AND deleted_at IS NULL ORDER BY sort_order",
+                (ch["id"],)).fetchall()
+            ens_children[ch["id"]] = subs
+            for sub in subs:
+                singers[sub["id"]] = _element_singers(conn, sub["id"])
     conn.close()
 
     new_song = create_floating_song({
@@ -152,8 +217,19 @@ def move_to_floating(element_id):
         "song_title": song["song_title"] or "未命名歌曲",
     })
     for ch in children:
-        ids = singers[ch["id"]] or ([ch["character_id"]] if ch["character_id"] else [])
-        add_lyric({"song_id": new_song["id"], "content": ch["content"], "character_ids": ids})
+        if ch["element_type"] == "ensemble":
+            ens = add_lyric({"song_id": new_song["id"], "element_type": "ensemble"})
+            for sub in ens_children.get(ch["id"], []):
+                add_lyric({
+                    "song_id": new_song["id"], "parent_id": ens["id"],
+                    "element_type": sub["element_type"] if sub["element_type"] in ("lyric", "dialogue") else "lyric",
+                    "content": sub["content"], "character_ids": singers[sub["id"]],
+                })
+        else:
+            add_lyric({
+                "song_id": new_song["id"], "element_type": ch["element_type"],
+                "content": ch["content"], "character_ids": singers[ch["id"]],
+            })
 
     # 删除原歌曲（子元素随 delete_element 删除）
     from services.script_service import delete_element
