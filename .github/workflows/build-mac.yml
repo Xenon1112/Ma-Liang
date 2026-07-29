@@ -17,6 +17,10 @@ on:
     tags:
       - 'v*'
 
+# 允许 GITHUB_TOKEN 创建 Release 并上传资产（tag 触发时）
+permissions:
+  contents: write
+
 jobs:
   build-mac:
     runs-on: macos-latest
