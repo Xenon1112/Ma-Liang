@@ -1,16 +1,15 @@
-"""小说写作助手 - Flask API Server"""
+"""小说写作助手 - API Server（miniframe，纯标准库，替代 Flask）"""
 import os
 import sys
 import json
 import argparse
 import html
 import logging
-import signal
 import socket
 import threading
 import webbrowser
 from pathlib import Path
-from flask import Flask, request, jsonify, send_from_directory
+from miniframe import Flask, request, jsonify, send_from_directory
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -76,8 +75,8 @@ def setup_logging(debug=False):
         handlers=handlers,
         force=True,
     )
-    # Flask/werkzeug 的请求日志也走同一配置
-    logging.getLogger("werkzeug").setLevel(logging.WARNING if not debug else logging.DEBUG)
+    # miniframe 的请求日志也走同一配置
+    logging.getLogger("miniframe").setLevel(logging.WARNING if not debug else logging.DEBUG)
 
 
 # ====== 友好错误页面 ======
@@ -625,11 +624,14 @@ def api_set_config():
 @app.route("/api/shutdown", methods=["POST"])
 def api_shutdown():
     def _stop():
+        # 先停 HTTP server，再关 webview 窗口（--browser 模式无窗口则跳过）
+        app.shutdown()
         try:
-            # 触发 KeyboardInterrupt，让 werkzeug 正常退出服务循环
-            signal.raise_signal(signal.SIGINT)
+            import webview
+            if webview.windows:
+                webview.windows[0].destroy()
         except Exception:
-            os._exit(0)
+            pass
     # 延迟片刻，让本次响应先送达浏览器
     threading.Timer(0.5, _stop).start()
     return jsonify({"ok": True})
@@ -803,8 +805,8 @@ def find_free_port(start, max_tries=100):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(prog="novel-writer", description=f"{APP_TITLE} v{get_version()}")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"监听端口（默认 {DEFAULT_PORT}）")
-    parser.add_argument("--no-browser", action="store_true", help="启动后不自动打开浏览器")
-    parser.add_argument("--debug", action="store_true", help="开启 Flask debug 模式（仅开发用）")
+    parser.add_argument("--browser", action="store_true", help="用系统浏览器打开（调试用），不开内置窗口")
+    parser.add_argument("--debug", action="store_true", help="开启 debug 模式（仅开发用）")
     parser.add_argument("--version", action="version", version=f"%(prog)s {get_version()}")
     return parser.parse_args(argv)
 
@@ -836,11 +838,29 @@ def main():
     log.info("版本：%s", get_version())
 
     url = f"http://localhost:{port}"
-    if not args.no_browser:
-        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-
     print(f"启动{APP_TITLE} v{get_version()}: {url}")
-    app.run(host="127.0.0.1", port=port, debug=args.debug)
+
+    if args.browser:
+        # 调试模式：不开内置窗口，用系统浏览器访问
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+        app.run(host="127.0.0.1", port=port, debug=args.debug)
+        return
+
+    # 默认：后台线程跑 HTTP server，主线程开 pywebview 内置窗口（窗口关闭即退出）
+    server_thread = threading.Thread(
+        target=app.run,
+        kwargs={"host": "127.0.0.1", "port": port, "debug": args.debug},
+        daemon=True,
+    )
+    server_thread.start()
+
+    import webview
+    webview.create_window(
+        f"{APP_TITLE} v{get_version()}", url,
+        width=1440, height=900, min_size=(1024, 700),
+    )
+    webview.start()  # 阻塞，窗口全部关闭后返回
+    app.shutdown()
 
 if __name__ == "__main__":
     main()

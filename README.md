@@ -1,6 +1,6 @@
 # 马良 (Ma Liang)
 
-马良是一款面向小说/剧本作者的本地写作工具，基于 Python Flask + SQLite，提供**版本管理、草稿管理、资料管理**及多格式导出。
+马良是一款面向小说/剧本作者的本地写作工具，基于 Python 标准库 + SQLite，桌面窗口由 pywebview 提供（无 Flask 等 Web 框架依赖），提供**版本管理、草稿管理、资料管理**及多格式导出。
 
 支持三种写作模式：**小说**、**话剧剧本**、**音乐剧剧本**。
 
@@ -41,12 +41,13 @@ uv sync
 uv run python app.py
 ```
 
-浏览器打开 `http://localhost:5200`
+默认打开内置桌面窗口；加 `--browser` 则用系统浏览器打开 `http://localhost:5200`
 
 ## 架构
 
 ```
 ┌──────────────────────────────────────────────────────┐
+│  pywebview 原生窗口 (Edge WebView2 / macOS WKWebView) │
 │  前端 (SPA)                                          │
 │  templates/index.html                                │
 │  ┌──────────┬──────────────────┬──────────────────┐  │
@@ -60,7 +61,8 @@ uv run python app.py
 │  └──────────┴──────────────────┴──────────────────┘  │
 │              ↕ REST API (fetch)                      │
 ├──────────────────────────────────────────────────────┤
-│  后端 (Flask)                                        │
+│  后端（纯标准库，无 Web 框架）                          │
+│  miniframe.py — 路由 shim (http.server)              │
 │  app.py — 70+ 路由                                   │
 │  ┌──────────┬──────────┬──────────┬──────────────┐  │
 │  │ project  │ chapter  │ draft    │ script       │  │
@@ -78,7 +80,8 @@ uv run python app.py
 
 ```
 novel-writer/
-├── app.py                      # Flask 主入口，70+ REST API 路由
+├── app.py                      # 主入口，70+ REST API 路由 + pywebview 窗口
+├── miniframe.py                # Flask API 子集 shim（纯标准库 http.server）
 ├── database.py                 # SQLite 初始化 + 版本化 migration (v1→v5)
 ├── _version.py                 # 版本号注入 (importlib.metadata / 打包回退)
 ├── services/                   # 业务逻辑层

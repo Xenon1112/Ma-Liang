@@ -18,7 +18,9 @@ a = Analysis(
         ('static', 'static'),
     ],
     hiddenimports=[
-        'flask',
+        'webview',
+        'webview.platforms.cocoa',
+        'objc',
         'docx',
         'sqlite3',
         'services.project_service',

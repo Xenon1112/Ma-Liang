@@ -11,7 +11,12 @@ a = Analysis(
         ('icon.ico', '.'),
     ],
     hiddenimports=[
-        'flask',
+        'webview',
+        'webview.platforms.winforms',
+        'webview.platforms.win32',
+        'webview.platforms.edgechromium',
+        'clr',
+        'clr_loader',
         'docx',
         'sqlite3',
         'services.project_service',
