@@ -6,6 +6,81 @@ const CardEditor = {
   currentSceneId: null,
   selectedCardIndex: -1,
   characterList: [],
+  // 歌曲收起状态（歌曲id → bool）：纯前端状态，不触发保存/刷新，localStorage 持久化
+  collapsedSongs: null,
+
+  // 从 localStorage 恢复歌曲收起状态（存的是已收起歌曲 id 的 JSON 数组）
+  loadCollapsedSongs() {
+    this.collapsedSongs = {};
+    try {
+      const ids = JSON.parse(localStorage.getItem('cardEditor.collapsedSongs') || '[]');
+      for (const id of ids) this.collapsedSongs[id] = true;
+    } catch (e) { /* localStorage 不可用或数据损坏时按全部展开处理 */ }
+  },
+
+  // 写回 localStorage（JSON 数组，只存已收起的歌曲 id）
+  saveCollapsedSongs() {
+    try {
+      const ids = Object.keys(this.collapsedSongs).filter(id => this.collapsedSongs[id]);
+      localStorage.setItem('cardEditor.collapsedSongs', JSON.stringify(ids));
+    } catch (e) { /* 忽略持久化失败，不影响本次收起 */ }
+  },
+
+  // 切换歌曲收起状态（纯前端，不发任何请求）
+  toggleSongCollapsed(songId) {
+    if (this.collapsedSongs === null) this.loadCollapsedSongs();
+    this.collapsedSongs[songId] = !this.collapsedSongs[songId];
+    this.saveCollapsedSongs();
+  },
+
+  // 歌曲卡片头部右键菜单（样式参照 script-sidebar.js 的 showScriptContextMenu）
+  showSongContextMenu(x, y, card) {
+    const old = document.querySelector('.context-menu');
+    if (old) old.remove();
+
+    const collapsed = !!((this.collapsedSongs || {})[card.id]);
+    const items = [
+      // 第一项按当前状态动态显示收起/展开（纯前端状态，不触发保存/刷新）
+      { label: collapsed ? '展开歌曲' : '收起歌曲', action: () => { this.toggleSongCollapsed(card.id); this.render(); } },
+    ];
+    // 转为游离歌曲：仅音乐剧项目的顶层歌曲（与头部「⇱ 游离」按钮同一逻辑）
+    if (AppState.currentProject?.project_type === 'musical' && !card.parent_id) {
+      items.push({ label: '转为游离歌曲…', action: () => this.convertSongToFloating(card) });
+    }
+
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;box-shadow:var(--shadow);z-index:500;min-width:140px;padding:4px;font-size:13px;`;
+    menu.innerHTML = items.map(it => `
+      <div class="ctx-item" style="padding:6px 12px;border-radius:4px;cursor:pointer;">${it.label}</div>
+    `).join('');
+    document.body.appendChild(menu);
+
+    // 防止菜单超出窗口右/下边缘：贴边时向左/向上偏移
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = Math.max(0, window.innerWidth - rect.width - 4) + 'px';
+    if (rect.bottom > window.innerHeight) menu.style.top = Math.max(0, window.innerHeight - rect.height - 4) + 'px';
+
+    menu.querySelectorAll('.ctx-item').forEach((el, i) => {
+      el.addEventListener('click', () => { menu.remove(); items[i].action(); });
+      el.addEventListener('mouseenter', () => el.style.background = 'var(--bg-hover)');
+      el.addEventListener('mouseleave', () => el.style.background = 'transparent');
+    });
+    setTimeout(() => document.addEventListener('click', function c(e) { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', c); } }), 0);
+  },
+
+  // 歌曲转游离歌曲（移出正文，仅保留在 JSON 导出）；头部「⇱ 游离」按钮与右键菜单共用
+  async convertSongToFloating(card) {
+    if (!await uiConfirm('将此歌曲转为游离歌曲？将从正文移除（唱词、歌中对白与重唱均保留，仅出现在 JSON 导出）。', { okText: '转换' })) return;
+    try {
+      await api.element.moveToFloating(card.id);
+      toast('已转为游离歌曲');
+      await this.loadScene(this.currentSceneId);
+      ScriptSidebar.refresh();
+    } catch (err) {
+      toast('转换失败: ' + err.message, 'error');
+    }
+  },
 
   // 将树形元素展开为前序扁平列表，卡片 data-index 统一对应 flatElements
   flattenElements() {
@@ -86,6 +161,9 @@ const CardEditor = {
     const scene = AppState.currentScene;
     const scriptType = AppState.currentProject?.project_type || 'play';
     const isMusical = scriptType === 'musical';
+
+    // 首次渲染时从 localStorage 恢复歌曲收起状态（按歌曲 id 记忆，loadScene 后保持）
+    if (this.collapsedSongs === null) this.loadCollapsedSongs();
 
     // 确保有 card-editor-wrap
     let wrap = document.getElementById('card-editor-wrap');
@@ -172,14 +250,22 @@ const CardEditor = {
     const isEnsemble = elem.element_type === 'ensemble';
     const isDual = elem.element_type === 'dual';
     const isContainer = isSongContainer || isEnsemble || isDual;
+    // 歌曲容器收起状态（仅 song 支持收起，ensemble/dual 不做）
+    const songCollapsed = isSongContainer && !!((this.collapsedSongs || {})[elem.id]);
     const marginLeft = depth * 24;
 
     let html = '';
     html += `<div class="script-card" data-index="${index}" style="margin-bottom:8px;margin-left:${marginLeft}px;background:${cfg.bg};border:1px solid ${cfg.border};border-radius:8px;overflow:hidden;${selected}">`;
 
-    // 卡片头部
-    html += `<div style="display:flex;align-items:center;padding:6px 10px;gap:8px;font-size:12px;border-bottom:1px solid var(--border-color);">
-      <select class="card-type-select" data-index="${index}" style="border:none;background:transparent;font-size:12px;padding:2px;">
+    // 卡片头部（歌曲头部标记 class/data-index，用于双击/右键切换收起）
+    html += `<div ${isSongContainer ? `class="song-card-header" data-index="${index}" title="双击：收起/展开；右键：更多操作"` : ''} style="display:flex;align-items:center;padding:6px 10px;gap:8px;font-size:12px;border-bottom:1px solid var(--border-color);">`;
+
+    // 歌曲折叠指示（收起时为 ▶，展开为 ▼）
+    if (isSongContainer) {
+      html += `<span class="song-collapse-toggle" style="user-select:none;font-size:11px;color:var(--text-muted);width:14px;flex:none;">${songCollapsed ? '▶' : '▼'}</span>`;
+    }
+
+    html += `<select class="card-type-select" data-index="${index}" style="border:none;background:transparent;font-size:12px;padding:2px;">
         <option value="action" ${elem.element_type==='action'?'selected':''}>🎬 动作</option>
         <option value="dialogue" ${elem.element_type==='dialogue'?'selected':''}>💬 对白</option>
         ${isMusical ? `<option value="song" ${elem.element_type==='song'?'selected':''}>🎵 歌曲</option>` : ''}
@@ -207,6 +293,10 @@ const CardEditor = {
     // 歌曲标题（仅歌曲容器）
     if (isSongContainer) {
       html += `<input class="card-song-title" data-index="${index}" value="${escAttr(elem.song_title || '')}" placeholder="歌曲名" style="flex:1;border:none;background:transparent;font-size:13px;font-weight:bold;">`;
+      // 收起时显示半透明子计数，作头部视觉区分
+      if (songCollapsed) {
+        html += `<span style="opacity:0.5;font-size:11px;white-space:nowrap;">${(elem.children || []).length} 项</span>`;
+      }
       // 转为游离歌曲（仅顶层歌曲）
       if (depth === 0) {
         html += `<button class="card-to-floating" data-index="${index}" title="转为游离歌曲（移出正文，仅保留在 JSON 导出）" style="font-size:12px;padding:1px 4px;border:1px dashed var(--border-color);border-radius:4px;color:var(--text-secondary);">⇱ 游离</button>`;
@@ -231,8 +321,8 @@ const CardEditor = {
 
     html += `</div>`;
 
-    // 容器子元素
-    if (isContainer && elem.children) {
+    // 容器子元素（歌曲收起时不渲染子元素和容器内添加按钮）
+    if (isContainer && elem.children && !songCollapsed) {
       for (let j = 0; j < elem.children.length; j++) {
         html += this.renderCard(elem.children[j], this.flatElements.indexOf(elem.children[j]), isMusical, depth + 1);
       }
@@ -382,20 +472,11 @@ const CardEditor = {
       });
     });
 
-    // 歌曲转游离歌曲（移出正文，仅保留在 JSON 导出）
+    // 歌曲转游离歌曲（逻辑见 convertSongToFloating，头部按钮与右键菜单共用）
     wrap.querySelectorAll('.card-to-floating').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => {
         const card = this.getCard(parseInt(btn.dataset.index));
-        if (!card) return;
-        if (!await uiConfirm('将此歌曲转为游离歌曲？将从正文移除（唱词、歌中对白与重唱均保留，仅出现在 JSON 导出）。', { okText: '转换' })) return;
-        try {
-          await api.element.moveToFloating(card.id);
-          toast('已转为游离歌曲');
-          await this.loadScene(this.currentSceneId);
-          ScriptSidebar.refresh();
-        } catch (err) {
-          toast('转换失败: ' + err.message, 'error');
-        }
+        if (card) this.convertSongToFloating(card);
       });
     });
 
@@ -438,6 +519,28 @@ const CardEditor = {
           await api.element.create({ sceneId: this.currentSceneId, parent_id: song.id, element_type: childType });
           this.loadScene(this.currentSceneId);
         }
+      });
+    });
+
+    // 歌曲收起/展开：双击歌曲卡片头部直接切换；右键头部弹出菜单（收起/展开、转为游离歌曲）
+    wrap.querySelectorAll('.song-card-header').forEach(header => {
+      // 避开头部内的控件（歌名输入、类型/角色下拉、删除/游离按钮、拖拽手柄），控件上不触发
+      const isOnControl = (ev) => !!ev.target.closest('input, select, button, textarea, .card-drag-handle');
+      header.addEventListener('dblclick', (ev) => {
+        if (isOnControl(ev)) return;
+        ev.preventDefault();
+        const card = this.getCard(parseInt(header.dataset.index));
+        if (!card) return;
+        // 纯前端状态，不触发保存/刷新
+        this.toggleSongCollapsed(card.id);
+        this.render();
+      });
+      header.addEventListener('contextmenu', (ev) => {
+        if (isOnControl(ev)) return;
+        ev.preventDefault();
+        const card = this.getCard(parseInt(header.dataset.index));
+        if (!card) return;
+        this.showSongContextMenu(ev.clientX, ev.clientY, card);
       });
     });
 

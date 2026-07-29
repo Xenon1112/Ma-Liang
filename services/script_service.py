@@ -122,11 +122,20 @@ def create_scene(data):
 
 def update_scene(id, data):
     conn = get_conn()
-    allowed = ["title", "setting", "status"]
+    allowed = ["title", "setting", "status", "act_id"]
     sets, vals = [], []
     for k in allowed:
         if k in data:
-            sets.append(f"{k} = ?"); vals.append(data[k])
+            if k == "act_id":
+                # 传入 act_id 表示「移动到目标幕末尾」：校验目标幕存在且未软删，并排到该幕最后
+                target = conn.execute("SELECT id FROM acts WHERE id = ? AND deleted_at IS NULL", (data[k],)).fetchone()
+                if not target:
+                    conn.close()
+                    raise ValueError("目标幕不存在")
+                sets.append("act_id = ?"); vals.append(data[k])
+                sets.append("sort_order = ?"); vals.append(next_sort_order(conn, "scenes", "act_id", data[k]))
+            else:
+                sets.append(f"{k} = ?"); vals.append(data[k])
     if sets:
         sets.append("updated_at = datetime('now','localtime')")
         vals.append(id)

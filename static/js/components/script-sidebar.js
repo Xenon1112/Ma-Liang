@@ -132,6 +132,152 @@ const ScriptSidebar = {
         showFloatingContextMenu(e.clientX, e.clientY, parseInt(el.dataset.id));
       });
     });
+
+    // 幕/场拖拽排序与跨幕移动
+    this.bindTreeDragDrop(container);
+  },
+
+  // 幕/场拖拽（参照 CardEditor 的 dragover 指示线模式）：
+  // 幕头之间拖放 = 幕排序；场在同幕内拖放 = 场排序；
+  // 场拖到另一幕的幕头上或该幕场列表空白处 = 跨幕移动到该幕末尾
+  bindTreeDragDrop(container) {
+    let dragNode = null; // { type:'act'|'scene', id, actId(仅场) }
+    const clearIndicators = () => {
+      container.querySelectorAll('.tree-node-header').forEach(h => {
+        h.style.borderTop = ''; h.style.borderBottom = ''; h.style.outline = '';
+        delete h.dataset.dropPos; delete h.dataset.dropAct;
+      });
+      container.querySelectorAll('.tree-node-children').forEach(c => {
+        c.style.outline = ''; delete c.dataset.dropEnd;
+      });
+    };
+
+    // 幕头可拖拽
+    container.querySelectorAll('.tree-node[data-type="act"] > .tree-node-header').forEach(h => {
+      h.draggable = true;
+      h.addEventListener('dragstart', (e) => {
+        dragNode = { type: 'act', id: parseInt(h.dataset.id) };
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(dragNode.id));
+      });
+      h.addEventListener('dragend', () => { dragNode = null; clearIndicators(); });
+    });
+
+    // 场可拖拽
+    container.querySelectorAll('.tree-node[data-type="scene"] > .tree-node-header').forEach(h => {
+      h.draggable = true;
+      h.addEventListener('dragstart', (e) => {
+        dragNode = { type: 'scene', id: parseInt(h.dataset.id), actId: parseInt(h.dataset.act) };
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(dragNode.id));
+      });
+      h.addEventListener('dragend', () => { dragNode = null; clearIndicators(); });
+    });
+
+    container.addEventListener('dragover', (e) => {
+      if (!dragNode || !e.target.closest) return;
+      const header = e.target.closest('.tree-node-header');
+      // 场拖到某幕场列表的空白处 = 移到该幕末尾
+      if (dragNode.type === 'scene' && !header) {
+        const children = e.target.closest('.tree-node-children');
+        if (!children) return;
+        e.preventDefault();
+        clearIndicators();
+        children.style.outline = '2px dashed var(--accent)';
+        children.dataset.dropEnd = '1';
+        return;
+      }
+      if (!header) return;
+      const node = header.closest('.tree-node');
+      if (!node) return;
+      const targetType = node.dataset.type;
+      const targetId = parseInt(header.dataset.id);
+      if (dragNode.type === 'act') {
+        // 幕拖到另一幕头上：上/下半区显示插入线
+        if (targetType !== 'act' || targetId === dragNode.id) return;
+        e.preventDefault();
+        clearIndicators();
+        const rect = header.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < rect.height / 2;
+        header.dataset.dropPos = before ? 'before' : 'after';
+        if (before) header.style.borderTop = '2px solid var(--accent)';
+        else header.style.borderBottom = '2px solid var(--accent)';
+      } else if (targetType === 'scene') {
+        const targetActId = parseInt(header.dataset.act);
+        if (targetId === dragNode.id) return;
+        e.preventDefault();
+        clearIndicators();
+        if (targetActId === dragNode.actId) {
+          // 同幕内：上/下半区显示插入线
+          const rect = header.getBoundingClientRect();
+          const before = (e.clientY - rect.top) < rect.height / 2;
+          header.dataset.dropPos = before ? 'before' : 'after';
+          if (before) header.style.borderTop = '2px solid var(--accent)';
+          else header.style.borderBottom = '2px solid var(--accent)';
+        } else {
+          // 跨幕：高亮目标场，落下即移到该场所在幕末尾
+          header.style.outline = '2px solid var(--accent)';
+          header.dataset.dropAct = String(targetActId);
+        }
+      } else if (targetType === 'act') {
+        // 场拖到另一幕的幕头上 = 移到该幕末尾（高亮幕头）
+        if (targetId === dragNode.actId) return;
+        e.preventDefault();
+        clearIndicators();
+        header.style.outline = '2px solid var(--accent)';
+        header.dataset.dropAct = String(targetId);
+      }
+    });
+
+    container.addEventListener('drop', async (e) => {
+      if (!dragNode || !e.target.closest) return;
+      const info = dragNode;
+      const header = e.target.closest('.tree-node-header');
+      const children = header ? null : e.target.closest('.tree-node-children');
+      // 先取出目标信息再清理状态
+      let dropPos = null, dropAct = null, targetId = null, targetType = null;
+      if (header) {
+        dropPos = header.dataset.dropPos || null;
+        dropAct = header.dataset.dropAct ? parseInt(header.dataset.dropAct) : null;
+        targetId = parseInt(header.dataset.id);
+        targetType = header.closest('.tree-node')?.dataset.type;
+      } else if (children?.dataset.dropEnd) {
+        const actHeader = children.closest('.tree-node[data-type="act"]')?.querySelector('.tree-node-header');
+        if (actHeader) dropAct = parseInt(actHeader.dataset.id);
+      }
+      e.preventDefault();
+      clearIndicators();
+      dragNode = null;
+      try {
+        if (info.type === 'act' && targetType === 'act' && dropPos) {
+          // 幕排序：按目标幕上/下方插入
+          const ids = this.actData.map(a => a.id).filter(id => id !== info.id);
+          let at = ids.indexOf(targetId);
+          if (at === -1) return;
+          if (dropPos === 'after') at += 1;
+          ids.splice(at, 0, info.id);
+          await api.act.reorder(AppState.currentProject.id, ids);
+        } else if (info.type === 'scene' && targetType === 'scene' && dropPos) {
+          // 同幕内场排序：按目标场上/下方插入
+          const actObj = this.actData.find(a => a.id === info.actId);
+          const ids = (actObj?.scenes || []).map(s => s.id).filter(id => id !== info.id);
+          let at = ids.indexOf(targetId);
+          if (at === -1) return;
+          if (dropPos === 'after') at += 1;
+          ids.splice(at, 0, info.id);
+          await api.scene.reorder(info.actId, ids);
+        } else if (info.type === 'scene' && dropAct && dropAct !== info.actId) {
+          // 跨幕移动到目标幕末尾
+          await api.scene.update(info.id, { actId: dropAct });
+          toast('已移动到目标幕末尾');
+        } else {
+          return;
+        }
+        this.refresh();
+      } catch (err) {
+        toast('操作失败: ' + err.message, 'error');
+      }
+    });
   },
 };
 
@@ -145,8 +291,12 @@ function showScriptContextMenu(x, y, type, id) {
 
   const items = [
     { label: '重命名', action: () => renameScriptItem(type, id) },
-    { label: '删除', action: () => deleteScriptItem(type, id), danger: true },
   ];
+  // 场可跨幕移动（移到目标幕末尾）
+  if (type === 'scene') {
+    items.push({ label: '移动到幕末…', action: () => moveSceneToActEnd(id) });
+  }
+  items.push({ label: '删除', action: () => deleteScriptItem(type, id), danger: true });
 
   menu.innerHTML = items.map(it => `
     <div class="ctx-item" style="padding:6px 12px;border-radius:4px;cursor:pointer;${it.danger?'color:var(--danger)':''}">${it.label}</div>
@@ -202,6 +352,51 @@ async function showAddSceneModal() {
   await api.scene.create({ actId, projectId: AppState.currentProject.id, title });
   toast('场已创建', 'success');
   ScriptSidebar.refresh();
+}
+
+// 场右键「移动到幕末…」：弹窗选择目标幕，场排到该幕末尾
+async function moveSceneToActEnd(sceneId) {
+  // 找出当前场所在幕，置灰并标注「当前」
+  let currentActId = null;
+  for (const a of (ScriptSidebar.actData || [])) {
+    if ((a.scenes || []).some(s => s.id === sceneId)) { currentActId = a.id; break; }
+  }
+  const options = (ScriptSidebar.actData || []).map(a => ({ id: a.id, label: a.title, current: a.id === currentActId }));
+  if (!options.length) { toast('请先创建幕', 'error'); return; }
+  // 默认选中第一个非当前幕
+  const firstOther = options.find(o => !o.current);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="min-width:360px;">
+      <h3>移动到幕末</h3>
+      <div class="form-group">
+        <label>选择目标幕（场将排到该幕最后）</label>
+        <select id="mv-target-act" style="width:100%;">
+          ${options.map(o => `<option value="${o.id}"${o.current ? ' disabled' : ''}${firstOther && o.id === firstOther.id ? ' selected' : ''}>${escHtml(o.label)}${o.current ? '（当前）' : ''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel">取消</button>
+        <button class="btn-primary" id="mv-do-move">确定</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('.btn-cancel').onclick = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#mv-do-move').onclick = async () => {
+    const actId = parseInt(overlay.querySelector('#mv-target-act').value);
+    overlay.remove();
+    if (actId === currentActId) return;
+    try {
+      await api.scene.update(sceneId, { actId });
+      toast('已移动到目标幕末尾');
+      ScriptSidebar.refresh();
+    } catch (err) {
+      toast('移动失败: ' + err.message, 'error');
+    }
+  };
 }
 
 // ====== 游离歌曲右键菜单与操作 ======
