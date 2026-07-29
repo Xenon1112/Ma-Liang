@@ -69,7 +69,7 @@ const SearchPanel = {
       return;
     }
 
-    const typeLabels = { chapter:'章节', outline:'大纲', character:'人物', world_setting:'设定', inspiration:'灵感' };
+    const typeLabels = { chapter:'章节', outline:'大纲', character:'人物', world_setting:'设定', inspiration:'灵感', scene:'场景', floating_song:'歌曲' };
 
     resultsDiv.innerHTML = results.map(r => `
       <div class="search-result-item" data-type="${r.type}" data-id="${r.id}">
@@ -111,6 +111,28 @@ const SearchPanel = {
           AppState.rightPanelTab = 'outline';
           switchRightTab('outline');
           OutlinePanel.refresh();
+        } else if (type === 'scene') {
+          // 剧本场结果：从侧栏缓存中找到该场所在幕，展开后加载并高亮
+          let act = null;
+          let sc = null;
+          for (const a of (ScriptSidebar.actData || [])) {
+            const found = (a.scenes || []).find(s => s.id === id);
+            if (found) { act = a; sc = found; break; }
+          }
+          if (sc) {
+            AppState.currentAct = act;
+            AppState.currentScene = sc;
+            ScriptSidebar.collapsedActs[act.id] = false;
+            FloatingSongEditor.clear();
+            CardEditor.loadScene(id);
+            ScriptSidebar.render();
+          } else {
+            toast('该场已被删除', 'error');
+          }
+        } else if (type === 'floating_song') {
+          // 游离歌曲结果：打开游离歌曲编辑器并刷新侧栏高亮
+          await FloatingSongEditor.open(id);
+          ScriptSidebar.render();
         } else if (type === 'inspiration') {
           AppState.rightPanelTab = 'inspiration';
           switchRightTab('inspiration');

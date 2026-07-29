@@ -1,4 +1,4 @@
-from database import get_conn, row_to_dict, next_sort_order
+from database import get_conn, row_to_dict, next_sort_order, count_words
 
 def _get(data, snake_key, camel_key=None):
     """从 data 中取值，先找 snake_case，再找 camelCase"""
@@ -155,6 +155,17 @@ def set_scene_characters(scene_id, character_ids):
 
 CONTAINER_TYPES = ("song", "ensemble", "dual")
 
+def _refresh_scene_word_count(conn, scene_id):
+    """重算并写回某场字数：统计该场所有未删除元素（含嵌套子元素）的 content 与 song_title。
+    只执行 UPDATE，由调用方随同事务一起 commit"""
+    if not scene_id:
+        return
+    rows = conn.execute(
+        "SELECT content, song_title FROM script_elements WHERE scene_id = ? AND deleted_at IS NULL",
+        (scene_id,)).fetchall()
+    total = sum(count_words(r["content"])[1] + count_words(r["song_title"])[1] for r in rows)
+    conn.execute("UPDATE scenes SET word_count = ? WHERE id = ?", (total, scene_id))
+
 def _attach_characters(conn, elem):
     """给元素附加合唱者列表（character_ids），character_id 保持兼容（取第一个）"""
     rows = conn.execute(
@@ -242,6 +253,7 @@ def create_element(data):
     )
     if character_ids:
         _set_element_characters(conn, cur.lastrowid, character_ids)
+    _refresh_scene_word_count(conn, scene_id)
     conn.commit()
     row = conn.execute("SELECT * FROM script_elements WHERE id = ?", (cur.lastrowid,)).fetchone()
     elem = _attach_characters(conn, row_to_dict(row))
@@ -264,6 +276,9 @@ def update_element(id, data):
         conn.execute(f"UPDATE script_elements SET {', '.join(sets)} WHERE id = ?", vals)
     if character_ids is not None:
         _set_element_characters(conn, id, character_ids)
+    row = conn.execute("SELECT scene_id FROM script_elements WHERE id = ?", (id,)).fetchone()
+    if row:
+        _refresh_scene_word_count(conn, row["scene_id"])
     conn.commit()
     row = conn.execute("SELECT * FROM script_elements WHERE id = ?", (id,)).fetchone()
     elem = _attach_characters(conn, row_to_dict(row))
@@ -272,9 +287,12 @@ def update_element(id, data):
 
 def delete_element(id):
     conn = get_conn()
+    row = conn.execute("SELECT scene_id FROM script_elements WHERE id = ?", (id,)).fetchone()
+    scene_id = row["scene_id"] if row else None
     # 如果是 song 容器，级联删除子元素
     conn.execute("DELETE FROM script_elements WHERE parent_id = ?", (id,))
     conn.execute("DELETE FROM script_elements WHERE id = ?", (id,))
+    _refresh_scene_word_count(conn, scene_id)
     conn.commit()
     conn.close()
 
@@ -297,6 +315,14 @@ def reorder_elements(scene_id, parent_id, ordered_ids):
 def move_element(element_id, new_parent_id):
     """将元素移入/移出歌曲块"""
     conn = get_conn()
+    row = conn.execute("SELECT scene_id FROM script_elements WHERE id = ?", (element_id,)).fetchone()
+    old_scene_id = row["scene_id"] if row else None
     conn.execute("UPDATE script_elements SET parent_id = ? WHERE id = ?", (new_parent_id, element_id))
+    # 正常只换父容器、场不变；若跨场挂到别场容器下，新旧两个场景都要刷新
+    _refresh_scene_word_count(conn, old_scene_id)
+    if new_parent_id:
+        prow = conn.execute("SELECT scene_id FROM script_elements WHERE id = ?", (new_parent_id,)).fetchone()
+        if prow and prow["scene_id"] != old_scene_id:
+            _refresh_scene_word_count(conn, prow["scene_id"])
     conn.commit()
     conn.close()

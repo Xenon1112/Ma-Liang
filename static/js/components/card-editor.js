@@ -40,6 +40,30 @@ const CardEditor = {
     this.elements = await api.element.list(sceneId);
     this.selectedCardIndex = -1;
     this.render();
+    // 编辑区头部与侧栏同步显示当前场总字数
+    this.updateSceneWordCount();
+  },
+
+  // 统计当前场全部卡片（正文 content + 歌名 song_title）的字数，
+  // 局部同步到编辑区头部与侧栏该场节点，不做整树刷新
+  updateSceneWordCount() {
+    let text = '';
+    for (const el of this.flatElements) {
+      text += (el.content || '') + (el.song_title || '');
+    }
+    const { chinese, total } = countWords(text);
+    const zhEl = document.getElementById('word-count-chinese');
+    if (zhEl) zhEl.textContent = chinese;
+    const totalEl = document.getElementById('word-count-total');
+    if (totalEl) totalEl.textContent = total;
+    // 侧栏该场节点字数局部更新
+    const node = document.querySelector(`#tree-container .tree-node[data-type="scene"][data-id="${this.currentSceneId}"] .node-wordcount`);
+    if (node) node.textContent = `${total} 字`;
+    // 同步侧栏缓存数据，避免下次整树渲染时用旧值覆盖
+    for (const act of (ScriptSidebar.actData || [])) {
+      const sc = (act.scenes || []).find(s => s.id === this.currentSceneId);
+      if (sc) { sc.word_count = total; break; }
+    }
   },
 
   clear() {
@@ -50,6 +74,11 @@ const CardEditor = {
     if (document.getElementById('card-editor-wrap')) {
       document.getElementById('card-editor-wrap').innerHTML = '';
     }
+    // 编辑区头部字数归零（剧本模式显示当前场总字数）
+    const zhEl = document.getElementById('word-count-chinese');
+    if (zhEl) zhEl.textContent = '0';
+    const totalEl = document.getElementById('word-count-total');
+    if (totalEl) totalEl.textContent = '0';
   },
 
   render() {
@@ -347,6 +376,8 @@ const CardEditor = {
           const title = inp.value.trim();
           card.song_title = title;
           await api.element.update(card.id, { song_title: title });
+          // 歌名计入场总字数，保存后同步更新
+          this.updateSceneWordCount();
         }
       });
     });
@@ -356,7 +387,7 @@ const CardEditor = {
       btn.addEventListener('click', async () => {
         const card = this.getCard(parseInt(btn.dataset.index));
         if (!card) return;
-        if (!await uiConfirm('将此歌曲转为游离歌曲？将从正文移除（唱词保留，仅出现在 JSON 导出）。', { okText: '转换' })) return;
+        if (!await uiConfirm('将此歌曲转为游离歌曲？将从正文移除（唱词、歌中对白与重唱均保留，仅出现在 JSON 导出）。', { okText: '转换' })) return;
         try {
           await api.element.moveToFloating(card.id);
           toast('已转为游离歌曲');
@@ -478,6 +509,8 @@ const CardEditor = {
     if (content !== elem.content) {
       elem.content = content;
       await api.element.update(elem.id, { content });
+      // 保存成功后局部更新当前场字数（编辑区头部 + 侧栏该场节点）
+      this.updateSceneWordCount();
     }
   },
 

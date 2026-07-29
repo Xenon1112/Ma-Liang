@@ -10,13 +10,21 @@ const ProjectList = {
     }
     grid.innerHTML = projects.map(p => {
       const typeLabel = typeBadge(p.project_type);
+      // 统计行按作品类型区分：小说为「章 · 字」，剧本为「幕 · 场 · 字」（音乐剧另附歌曲数）
+      const isScript = p.project_type === 'play' || p.project_type === 'musical';
+      const statsHtml = isScript
+        ? `<span>${p.actCount || 0} 幕</span>
+            <span>${p.sceneCount || 0} 场</span>
+            <span>${p.totalWords || 0} 字</span>` +
+          (p.project_type === 'musical' ? `<span>${p.songCount || 0} 歌</span>` : '')
+        : `<span>${p.chapterCount || 0} 章</span>
+            <span>${p.totalWords || 0} 字</span>`;
       return `
         <div class="project-card" data-id="${p.id}">
           <h3>${escHtml(p.title)} ${typeLabel}</h3>
           <div class="card-desc">${escHtml(p.description || '暂无简介')}</div>
           <div class="card-stats">
-            <span>${p.chapterCount ?? 0} 章</span>
-            <span>${p.totalWords ?? 0} 字</span>
+            ${statsHtml}
             <span>${p.status === 'writing' ? '写作中' : p.status === 'completed' ? '已完成' : '暂停'}</span>
             <span>${p.updated_at?.substring(0,10) || ''}</span>
           </div>
