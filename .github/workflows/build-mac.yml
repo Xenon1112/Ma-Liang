@@ -84,20 +84,20 @@ jobs:
             -volname "马良" \
             -srcfolder "$DMG_STAGING" \
             -ov -format UDZO \
-            "dist/马良-macOS.dmg"
-          ls -lh "dist/马良-macOS.dmg"
+            "dist/Ma-Liang-macOS.dmg"
+          ls -lh "dist/Ma-Liang-macOS.dmg"
 
       # 8. 上传 DMG 构建产物
       - name: 上传 DMG 产物
         uses: actions/upload-artifact@v4
         with:
-          name: 马良-macOS
-          path: dist/马良-macOS.dmg
+          name: Ma-Liang-macOS
+          path: dist/Ma-Liang-macOS.dmg
 
       # 9. 标签触发时，将 DMG 附加到 GitHub Release
       - name: 上传到 Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/马良-macOS.dmg
+          files: dist/Ma-Liang-macOS.dmg
 
