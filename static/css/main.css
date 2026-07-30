@@ -34,6 +34,16 @@ input:focus, textarea:focus, select:focus {
   border-color: var(--accent);
 }
 
+/* 原生下拉弹出的选项列表不继承 select 的样式，需单独指定，否则暗色主题下白底浅字 */
+select option {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+select option:disabled {
+  color: var(--text-muted);
+}
+
 ul, ol { list-style: none; }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -107,6 +117,7 @@ ul, ol { list-style: none; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.2s ease, min-width 0.2s ease;
 }
 
 #sidebar .sidebar-header {
@@ -258,6 +269,9 @@ ul, ol { list-style: none; }
 #editor-header .word-stats {
   font-size: 12px;
   color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 #editor-container {
@@ -265,6 +279,7 @@ ul, ol { list-style: none; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--editor-bg);
 }
 
 #editor {
@@ -352,6 +367,7 @@ ul, ol { list-style: none; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.2s ease, min-width 0.2s ease;
 }
 
 #right-panel.collapsed {
@@ -629,13 +645,13 @@ ul, ol { list-style: none; }
 }
 
 .diff-added {
-  background: #d4edda;
-  color: #155724;
+  background: var(--diff-added-bg);
+  color: var(--diff-added-text);
 }
 
 .diff-removed {
-  background: #f8d7da;
-  color: #721c24;
+  background: var(--diff-removed-bg);
+  color: var(--diff-removed-text);
 }
 
 /* ====== Toast ====== */
@@ -677,7 +693,6 @@ body.focus-mode #version-panel { display: none; }
 
 body.focus-mode #editor {
   padding: 60px 120px;
-  font-size: 18px;
 }
 
 /* ====== Diff Modal ====== */
@@ -798,10 +813,33 @@ body.focus-mode #editor {
 }
 
 .search-result-item .result-snippet mark {
-  background: #fff3cd;
-  color: #856404;
+  background: var(--mark-bg);
+  color: var(--mark-text);
   padding: 0 2px;
 }
+
+/* ====== 作品类型徽章 ====== */
+.badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: normal;
+}
+
+.badge-novel { background: var(--badge-novel-bg); color: var(--badge-novel-text); }
+.badge-play { background: var(--badge-play-bg); color: var(--badge-play-text); }
+.badge-musical { background: var(--badge-musical-bg); color: var(--badge-musical-text); }
+
+/* ====== 编辑器排版按钮 ====== */
+#btn-editor-style {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+#btn-editor-style:hover { background: var(--bg-hover); }
 
 /* ====== Hide panels ====== */
 .hidden { display: none !important; }

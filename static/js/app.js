@@ -21,6 +21,13 @@ function toast(message, type = 'info') {
   setTimeout(() => el.remove(), 2500);
 }
 
+// ====== 主题按钮指示（显示当前主题名）======
+function updateThemeButton() {
+  const label = { light: '亮色', dark: '暗色', warm: '护眼' }[AppState.theme] || AppState.theme;
+  const btn = document.getElementById('btn-theme');
+  if (btn) btn.textContent = `主题·${label}`;
+}
+
 // ====== App 核心逻辑 ======
 const App = {
   async init() {
@@ -29,6 +36,7 @@ const App = {
       const config = await api.app.getConfig();
       AppState.config = config;
       AppState.setTheme(config.theme || 'light');
+      updateThemeButton();
     } catch (e) {
       console.log('Config not loaded, using defaults');
     }
@@ -157,6 +165,12 @@ const App = {
       });
     });
 
+    // 页面关闭/刷新前兜底保存（自动保存是防抖的，直接关窗可能丢最后几秒内容）
+    window.addEventListener('pagehide', () => {
+      Editor.saveOnUnload();
+      if (typeof CardEditor !== 'undefined') CardEditor.saveAllOnUnload();
+    });
+
     // 键盘快捷键（可自定义，见 Shortcuts）
     document.addEventListener('keydown', (e) => {
       const act = Shortcuts.actionFor(e);
@@ -266,6 +280,7 @@ const App = {
     const next = themes[(idx + 1) % themes.length];
     AppState.setTheme(next);
     api.app.setConfig({ theme: next });
+    updateThemeButton();
     toast(`已切换为${next === 'light' ? '亮色' : next === 'dark' ? '暗色' : '护眼'}主题`);
   },
 
@@ -341,8 +356,10 @@ const BackupDialog = {
         <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
           <button class="btn-primary" id="btn-do-backup" style="padding:10px;">📦 创建备份（保存到用户目录）</button>
           <div>
-            <input id="restore-path" type="text" placeholder="输入备份文件完整路径来恢复" style="width:100%;padding:8px;margin-bottom:4px;">
-            <button id="btn-do-restore" style="padding:6px 12px;border:1px solid var(--danger);border-radius:4px;color:var(--danger);">📂 从备份恢复（需要重启应用）</button>
+            <label style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:4px;">从备份恢复（需要重启应用）</label>
+            <select id="restore-select" style="width:100%;margin-bottom:4px;"></select>
+            <input id="restore-path" type="text" placeholder="或输入其他备份文件的完整路径" style="width:100%;padding:8px;margin-bottom:4px;">
+            <button id="btn-do-restore" style="padding:6px 12px;border:1px solid var(--danger);border-radius:4px;color:var(--danger);">📂 从备份恢复</button>
           </div>
           <button id="btn-show-db-path" style="padding:10px;border:1px solid var(--border-color);border-radius:6px;">📁 查看数据库文件位置</button>
         </div>
@@ -356,6 +373,23 @@ const BackupDialog = {
     overlay.querySelector('.btn-cancel').onclick = () => overlay.remove();
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
+    // 加载备份文件列表（用户目录下本应用创建的备份）
+    const select = overlay.querySelector('#restore-select');
+    try {
+      const backups = await api.backup.list();
+      if (backups.length === 0) {
+        select.innerHTML = '<option value="">（暂无备份文件）</option>';
+      } else {
+        select.innerHTML = backups.map(b => {
+          const sizeMB = (b.fileSize / 1024 / 1024).toFixed(1);
+          const date = (b.date || '').replace('T', ' ').substring(0, 19);
+          return `<option value="${escAttr(b.filePath)}">${escHtml(date)}（${sizeMB} MB）</option>`;
+        }).join('');
+      }
+    } catch (e) {
+      select.innerHTML = '<option value="">（备份列表加载失败）</option>';
+    }
+
     overlay.querySelector('#btn-do-backup').onclick = async () => {
       try {
         const result = await api.backup.create();
@@ -367,8 +401,9 @@ const BackupDialog = {
     };
 
     overlay.querySelector('#btn-do-restore').onclick = async () => {
-      const filePath = document.getElementById('restore-path').value.trim();
-      if (!filePath) { toast('请输入备份文件路径', 'error'); return; }
+      // 优先使用手动输入的路径，否则用下拉选中的备份
+      const filePath = document.getElementById('restore-path').value.trim() || select.value;
+      if (!filePath) { toast('请选择或输入备份文件路径', 'error'); return; }
       if (!await uiConfirm('恢复备份将覆盖当前所有数据并重启应用，确定继续？', { danger: true, okText: '恢复' })) return;
       try {
         await api.backup.restore(filePath);

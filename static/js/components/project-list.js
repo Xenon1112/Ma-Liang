@@ -188,9 +188,9 @@ function showEditProjectModal(p) {
 
 function typeBadge(type) {
   const map = {
-    novel: '<span style="font-size:11px;background:#e8f0fe;color:#1967d2;padding:1px 6px;border-radius:4px;">小说</span>',
-    play: '<span style="font-size:11px;background:#e6f4ea;color:#137333;padding:1px 6px;border-radius:4px;">话剧</span>',
-    musical: '<span style="font-size:11px;background:#fce8e6;color:#c5221f;padding:1px 6px;border-radius:4px;">音乐剧</span>',
+    novel: '<span class="badge badge-novel">小说</span>',
+    play: '<span class="badge badge-play">话剧</span>',
+    musical: '<span class="badge badge-musical">音乐剧</span>',
   };
   return map[type] || '';
 }

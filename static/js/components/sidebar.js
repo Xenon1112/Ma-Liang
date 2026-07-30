@@ -107,6 +107,152 @@ const Sidebar = {
         showContextMenu(e.clientX, e.clientY, 'chapter', parseInt(el.dataset.id));
       });
     });
+
+    // 卷/章拖拽排序与跨卷移动
+    this.bindTreeDragDrop(container);
+  },
+
+  // 卷/章拖拽（参照剧本目录树的 dragover 指示线模式）：
+  // 卷头之间拖放 = 卷排序；章在同卷内拖放 = 章排序；
+  // 章拖到另一卷的卷头上或该卷章列表空白处 = 跨卷移动到该卷末尾
+  bindTreeDragDrop(container) {
+    let dragNode = null; // { type:'volume'|'chapter', id, volId(仅章) }
+    const clearIndicators = () => {
+      container.querySelectorAll('.tree-node-header').forEach(h => {
+        h.style.borderTop = ''; h.style.borderBottom = ''; h.style.outline = '';
+        delete h.dataset.dropPos; delete h.dataset.dropVol;
+      });
+      container.querySelectorAll('.tree-node-children').forEach(c => {
+        c.style.outline = ''; delete c.dataset.dropEnd;
+      });
+    };
+
+    // 卷头可拖拽
+    container.querySelectorAll('.tree-node[data-type="volume"] > .tree-node-header').forEach(h => {
+      h.draggable = true;
+      h.addEventListener('dragstart', (e) => {
+        dragNode = { type: 'volume', id: parseInt(h.dataset.id) };
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(dragNode.id));
+      });
+      h.addEventListener('dragend', () => { dragNode = null; clearIndicators(); });
+    });
+
+    // 章可拖拽
+    container.querySelectorAll('.tree-node[data-type="chapter"] > .tree-node-header').forEach(h => {
+      h.draggable = true;
+      h.addEventListener('dragstart', (e) => {
+        dragNode = { type: 'chapter', id: parseInt(h.dataset.id), volId: parseInt(h.dataset.vol) };
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(dragNode.id));
+      });
+      h.addEventListener('dragend', () => { dragNode = null; clearIndicators(); });
+    });
+
+    container.addEventListener('dragover', (e) => {
+      if (!dragNode || !e.target.closest) return;
+      const header = e.target.closest('.tree-node-header');
+      // 章拖到某卷章列表的空白处 = 移到该卷末尾
+      if (dragNode.type === 'chapter' && !header) {
+        const children = e.target.closest('.tree-node-children');
+        if (!children) return;
+        e.preventDefault();
+        clearIndicators();
+        children.style.outline = '2px dashed var(--accent)';
+        children.dataset.dropEnd = '1';
+        return;
+      }
+      if (!header) return;
+      const node = header.closest('.tree-node');
+      if (!node) return;
+      const targetType = node.dataset.type;
+      const targetId = parseInt(header.dataset.id);
+      if (dragNode.type === 'volume') {
+        // 卷拖到另一卷头上：上/下半区显示插入线
+        if (targetType !== 'volume' || targetId === dragNode.id) return;
+        e.preventDefault();
+        clearIndicators();
+        const rect = header.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < rect.height / 2;
+        header.dataset.dropPos = before ? 'before' : 'after';
+        if (before) header.style.borderTop = '2px solid var(--accent)';
+        else header.style.borderBottom = '2px solid var(--accent)';
+      } else if (targetType === 'chapter') {
+        const targetVolId = parseInt(header.dataset.vol);
+        if (targetId === dragNode.id) return;
+        e.preventDefault();
+        clearIndicators();
+        if (targetVolId === dragNode.volId) {
+          // 同卷内：上/下半区显示插入线
+          const rect = header.getBoundingClientRect();
+          const before = (e.clientY - rect.top) < rect.height / 2;
+          header.dataset.dropPos = before ? 'before' : 'after';
+          if (before) header.style.borderTop = '2px solid var(--accent)';
+          else header.style.borderBottom = '2px solid var(--accent)';
+        } else {
+          // 跨卷：高亮目标章，落下即移到该章所在卷末尾
+          header.style.outline = '2px solid var(--accent)';
+          header.dataset.dropVol = String(targetVolId);
+        }
+      } else if (targetType === 'volume') {
+        // 章拖到另一卷的卷头上 = 移到该卷末尾（高亮卷头）
+        if (targetId === dragNode.volId) return;
+        e.preventDefault();
+        clearIndicators();
+        header.style.outline = '2px solid var(--accent)';
+        header.dataset.dropVol = String(targetId);
+      }
+    });
+
+    container.addEventListener('drop', async (e) => {
+      if (!dragNode || !e.target.closest) return;
+      const info = dragNode;
+      const header = e.target.closest('.tree-node-header');
+      const children = header ? null : e.target.closest('.tree-node-children');
+      // 先取出目标信息再清理状态
+      let dropPos = null, dropVol = null, targetId = null, targetType = null;
+      if (header) {
+        dropPos = header.dataset.dropPos || null;
+        dropVol = header.dataset.dropVol ? parseInt(header.dataset.dropVol) : null;
+        targetId = parseInt(header.dataset.id);
+        targetType = header.closest('.tree-node')?.dataset.type;
+      } else if (children?.dataset.dropEnd) {
+        const volHeader = children.closest('.tree-node[data-type="volume"]')?.querySelector('.tree-node-header');
+        if (volHeader) dropVol = parseInt(volHeader.dataset.id);
+      }
+      e.preventDefault();
+      clearIndicators();
+      dragNode = null;
+      try {
+        if (info.type === 'volume' && targetType === 'volume' && dropPos) {
+          // 卷排序：按目标卷上/下方插入
+          const ids = this.volumeData.map(v => v.id).filter(id => id !== info.id);
+          let at = ids.indexOf(targetId);
+          if (at === -1) return;
+          if (dropPos === 'after') at += 1;
+          ids.splice(at, 0, info.id);
+          await api.volume.reorder(AppState.currentProject.id, ids);
+        } else if (info.type === 'chapter' && targetType === 'chapter' && dropPos) {
+          // 同卷内章排序：按目标章上/下方插入
+          const vol = this.volumeData.find(v => v.id === info.volId);
+          const ids = (vol?.chapters || []).map(c => c.id).filter(id => id !== info.id);
+          let at = ids.indexOf(targetId);
+          if (at === -1) return;
+          if (dropPos === 'after') at += 1;
+          ids.splice(at, 0, info.id);
+          await api.chapter.reorder(info.volId, ids);
+        } else if (info.type === 'chapter' && dropVol && dropVol !== info.volId) {
+          // 跨卷移动到目标卷末尾
+          await api.chapter.update(info.id, { volumeId: dropVol });
+          toast('已移动到目标卷末尾');
+        } else {
+          return;
+        }
+        this.refresh();
+      } catch (err) {
+        toast('操作失败: ' + err.message, 'error');
+      }
+    });
   },
 };
 

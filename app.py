@@ -39,7 +39,7 @@ from services.world_setting_service import list_settings, get_setting, create_se
 from services.inspiration_service import list_inspirations, get_inspiration, create_inspiration, update_inspiration
 from services.export_service import export_txt, export_docx
 from services.json_transfer_service import export_project_json, import_project_json
-from services.backup_service import create_backup, restore_backup, get_backup_info
+from services.backup_service import create_backup, restore_backup, get_backup_info, list_backups
 from services.recycle_service import list_recycle, restore, permanently_delete, clean_expired
 from services.search_service import full_text
 from services.config_service import get_config, set_config
@@ -558,6 +558,10 @@ def api_export_json():
 @app.route("/api/backup", methods=["POST"])
 def api_create_backup():
     return jsonify(create_backup(req_json().get("backupPath")))
+
+@app.route("/api/backup/list", methods=["GET"])
+def api_list_backups():
+    return jsonify(list_backups())
 
 @app.route("/api/backup/info", methods=["POST"])
 def api_backup_info():

@@ -162,7 +162,8 @@ def send_from_directory(directory, filename):
         raise _HTTPError(404)
     with open(full, "rb") as f:
         body = f.read()
-    return Response(body, 200, _guess_type(full))
+    # 本地桌面应用禁用缓存，避免内置浏览器缓存旧 CSS/JS/HTML 导致界面更新不生效
+    return Response(body, 200, _guess_type(full), headers={"Cache-Control": "no-store"})
 
 
 class _Route:

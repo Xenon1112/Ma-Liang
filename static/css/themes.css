@@ -20,6 +20,30 @@ body.theme-light {
   --scrollbar-thumb: #c0c0c0;
   --scrollbar-track: #f0f0f0;
   --shadow: 0 1px 3px rgba(0,0,0,0.1);
+  /* diff / 搜索高亮 / 类型徽章 */
+  --diff-added-bg: #d4edda;
+  --diff-added-text: #155724;
+  --diff-removed-bg: #f8d7da;
+  --diff-removed-text: #721c24;
+  --mark-bg: #fff3cd;
+  --mark-text: #856404;
+  --badge-novel-bg: #e8f0fe;
+  --badge-novel-text: #1967d2;
+  --badge-play-bg: #e6f4ea;
+  --badge-play-text: #137333;
+  --badge-musical-bg: #fce8e6;
+  --badge-musical-text: #c5221f;
+  /* 剧本卡片类型配色 */
+  --card-song-bg: #e8f0fe;
+  --card-song-border: #90b8f8;
+  --card-lyric-bg: #f3e8ff;
+  --card-lyric-border: #c4a0f0;
+  --card-ensemble-bg: #fff3e0;
+  --card-ensemble-border: #f0c080;
+  --card-dual-bg: #e6f4ea;
+  --card-dual-border: #7bc8a4;
+  --ensemble-text: #c8801a;
+  --dual-text: #2e7d32;
 }
 
 /* ====== 暗色主题 ====== */
@@ -44,6 +68,30 @@ body.theme-dark {
   --scrollbar-thumb: #555555;
   --scrollbar-track: #2a2a2a;
   --shadow: 0 1px 3px rgba(0,0,0,0.3);
+  /* diff / 搜索高亮 / 类型徽章 */
+  --diff-added-bg: #1e3a2a;
+  --diff-added-text: #8fd6a8;
+  --diff-removed-bg: #3d2226;
+  --diff-removed-text: #f0a3a3;
+  --mark-bg: #4a3d1e;
+  --mark-text: #e6c86e;
+  --badge-novel-bg: #26325c;
+  --badge-novel-text: #9db4ff;
+  --badge-play-bg: #1f3d2a;
+  --badge-play-text: #8fd6a8;
+  --badge-musical-bg: #47272b;
+  --badge-musical-text: #f2a9a4;
+  /* 剧本卡片类型配色 */
+  --card-song-bg: #25304e;
+  --card-song-border: #4a6bb8;
+  --card-lyric-bg: #342a4a;
+  --card-lyric-border: #8266b8;
+  --card-ensemble-bg: #40311f;
+  --card-ensemble-border: #a07a48;
+  --card-dual-bg: #1e3527;
+  --card-dual-border: #4f8a68;
+  --ensemble-text: #d9a860;
+  --dual-text: #6fbf92;
 }
 
 /* ====== 护眼主题 ====== */
@@ -68,4 +116,28 @@ body.theme-warm {
   --scrollbar-thumb: #c8b896;
   --scrollbar-track: #eee8d5;
   --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  /* diff / 搜索高亮 / 类型徽章 */
+  --diff-added-bg: #dce8cf;
+  --diff-added-text: #4a6b3a;
+  --diff-removed-bg: #f0d8ce;
+  --diff-removed-text: #8c4a3a;
+  --mark-bg: #f3e3b3;
+  --mark-text: #7a6420;
+  --badge-novel-bg: #dde3cc;
+  --badge-novel-text: #5a6633;
+  --badge-play-bg: #d3e2d5;
+  --badge-play-text: #3f6b4a;
+  --badge-musical-bg: #edd9cf;
+  --badge-musical-text: #8a4a38;
+  /* 剧本卡片类型配色 */
+  --card-song-bg: #e8f0fe;
+  --card-song-border: #90b8f8;
+  --card-lyric-bg: #f3e8ff;
+  --card-lyric-border: #c4a0f0;
+  --card-ensemble-bg: #fff3e0;
+  --card-ensemble-border: #f0c080;
+  --card-dual-bg: #e6f4ea;
+  --card-dual-border: #7bc8a4;
+  --ensemble-text: #c8801a;
+  --dual-text: #2e7d32;
 }

@@ -43,3 +43,19 @@ def get_backup_info(backup_file_path):
         "fileSize": stat.st_size,
         "date": datetime.fromtimestamp(stat.st_mtime).isoformat(),
     }
+
+def list_backups():
+    # 列出用户目录下由本应用创建的备份文件（与 create_backup 的命名规则一致），新的在前
+    home = os.path.expanduser("~")
+    items = []
+    for name in os.listdir(home):
+        if name.startswith("novel-writer-backup-") and name.endswith(".db"):
+            path = os.path.join(home, name)
+            stat = os.stat(path)
+            items.append({
+                "filePath": path,
+                "fileSize": stat.st_size,
+                "date": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+    items.sort(key=lambda x: x["date"], reverse=True)
+    return items

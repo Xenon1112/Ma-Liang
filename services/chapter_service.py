@@ -90,6 +90,12 @@ def update_chapter(id, data):
         if k in data:
             sets.append(f"{k} = ?")
             vals.append(data[k])
+    # 跨卷移动：排到目标卷末尾
+    if "volume_id" in data:
+        sets.append("volume_id = ?")
+        vals.append(data["volume_id"])
+        sets.append("sort_order = ?")
+        vals.append(next_sort_order(conn, "chapters", "volume_id", data["volume_id"]))
     if sets:
         sets.append("updated_at = datetime('now','localtime')")
         vals.append(id)

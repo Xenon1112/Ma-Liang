@@ -116,6 +116,7 @@ const api = {
 
   backup: {
     create: (backupPath) => api._post('/api/backup', { backupPath }),
+    list: () => api._get('/api/backup/list'),
     restore: (backupFilePath) => api._post('/api/backup/restore', { backupFilePath }),
     getInfo: (backupFilePath) => api._post('/api/backup/info', { backupFilePath }),
     getDbPath: () => api._get('/api/backup/db-path'),

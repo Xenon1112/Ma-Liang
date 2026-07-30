@@ -112,6 +112,31 @@ const Editor = {
     document.getElementById('word-count-total').textContent = total;
   },
 
+  // 页面关闭/刷新前的兜底保存：keepalive 请求可在页面卸载后继续完成
+  saveOnUnload() {
+    if (!AppState.isDirty && !this.saveTimer) return;
+    const chId = AppState.currentChapter?.id || null;
+    const volId = chId ? null : (AppState.currentVolume?.id || null);
+    if (!chId && !volId) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    this.saveSnapshot = null;
+    const content = document.getElementById('editor').value;
+    try {
+      fetch('/api/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chapterId: chId || undefined,
+          volumeId: chId ? undefined : volId,
+          content,
+          versionTag: 'auto',
+        }),
+        keepalive: true,
+      });
+    } catch (e) { /* 页面正在卸载，忽略失败 */ }
+  },
+
   // 清空编辑器
   clear() {
     // 取消待触发的自动保存，防止写入已切换/已删除的章节

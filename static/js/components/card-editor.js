@@ -237,10 +237,10 @@ const CardEditor = {
     const typeConfig = {
       action: { icon: '🎬', label: '动作', bg: 'var(--bg-tertiary)', border: 'var(--border-color)' },
       dialogue: { icon: '💬', label: '对白', bg: 'var(--bg-primary)', border: 'var(--border-color)' },
-      song: { icon: '🎵', label: '歌曲', bg: '#e8f0fe', border: '#90b8f8' },
-      lyric: { icon: '🎤', label: '唱词', bg: '#f3e8ff', border: '#c4a0f0' },
-      ensemble: { icon: '🎼', label: '重唱', bg: '#fff3e0', border: '#f0c080' },
-      dual: { icon: '🗣', label: '叠白', bg: '#e6f4ea', border: '#7bc8a4' },
+      song: { icon: '🎵', label: '歌曲', bg: 'var(--card-song-bg)', border: 'var(--card-song-border)' },
+      lyric: { icon: '🎤', label: '唱词', bg: 'var(--card-lyric-bg)', border: 'var(--card-lyric-border)' },
+      ensemble: { icon: '🎼', label: '重唱', bg: 'var(--card-ensemble-bg)', border: 'var(--card-ensemble-border)' },
+      dual: { icon: '🗣', label: '叠白', bg: 'var(--card-dual-bg)', border: 'var(--card-dual-border)' },
     };
     const cfg = typeConfig[elem.element_type] || typeConfig.action;
     const charName = (elem.element_type === 'lyric' || elem.element_type === 'dialogue')
@@ -304,11 +304,11 @@ const CardEditor = {
     }
     // 重唱标识
     if (isEnsemble) {
-      html += `<span style="font-size:13px;font-weight:bold;color:#c8801a;">🎼 重唱（多人同时唱不同的词）</span>`;
+      html += `<span style="font-size:13px;font-weight:bold;color:var(--ensemble-text);">🎼 重唱（多人同时唱不同的词）</span>`;
     }
     // 叠白标识
     if (isDual) {
-      html += `<span style="font-size:13px;font-weight:bold;color:#2e7d32;">🗣 叠白（多人同时说不同的话）</span>`;
+      html += `<span style="font-size:13px;font-weight:bold;color:var(--dual-text);">🗣 叠白（多人同时说不同的话）</span>`;
     }
 
     html += `<span style="flex:1;"></span>`;
@@ -329,12 +329,12 @@ const CardEditor = {
       // 容器内添加按钮
       html += `<div style="margin-left:${(depth+1)*24}px;margin-bottom:8px;text-align:center;">`;
       if (isDual) {
-        html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="dialogue" style="margin:2px;padding:4px 10px;border:1px dashed #7bc8a4;border-radius:4px;font-size:11px;">+ 💬 对白</button>`;
+        html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="dialogue" style="margin:2px;padding:4px 10px;border:1px dashed var(--card-dual-border);border-radius:4px;font-size:11px;">+ 💬 对白</button>`;
       } else {
         html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="lyric" style="margin:2px;padding:4px 10px;border:1px dashed var(--border-color);border-radius:4px;font-size:11px;">+ 🎤 唱词</button>`;
         if (isSongContainer) {
           html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="dialogue" style="margin:2px;padding:4px 10px;border:1px dashed var(--border-color);border-radius:4px;font-size:11px;">+ 💬 歌中对白</button>`;
-          html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="ensemble" style="margin:2px;padding:4px 10px;border:1px dashed #f0c080;border-radius:4px;font-size:11px;">+ 🎼 重唱</button>`;
+          html += `<button class="add-song-child-btn" data-song-index="${index}" data-type="ensemble" style="margin:2px;padding:4px 10px;border:1px dashed var(--card-ensemble-border);border-radius:4px;font-size:11px;">+ 🎼 重唱</button>`;
         }
       }
       html += `</div>`;
@@ -615,6 +615,24 @@ const CardEditor = {
       // 保存成功后局部更新当前场字数（编辑区头部 + 侧栏该场节点）
       this.updateSceneWordCount();
     }
+  },
+
+  // 页面关闭/刷新前的兜底保存：对所有有改动的卡片发 keepalive 请求
+  saveAllOnUnload() {
+    if (!this.currentSceneId) return;
+    document.querySelectorAll('#card-list .card-content').forEach(ta => {
+      const cardId = this.getCard(parseInt(ta.dataset.index))?.id;
+      const elem = this.flatElements.find(el => el.id === cardId);
+      if (!elem || ta.value === elem.content) return;
+      try {
+        fetch(`/api/elements/${cardId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: ta.value }),
+          keepalive: true,
+        });
+      } catch (e) { /* 页面正在卸载，忽略失败 */ }
+    });
   },
 
   // 手动保存：立即保存当前场景所有卡片（冲刷各卡片的防抖自动保存）

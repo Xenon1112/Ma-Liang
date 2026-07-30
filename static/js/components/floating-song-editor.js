@@ -78,7 +78,7 @@ const FloatingSongEditor = {
     html += `<div style="text-align:center;margin-top:8px;">
       <button class="fsong-add-elem" data-type="lyric" style="margin:4px;padding:6px 14px;border:1px dashed var(--border-color);border-radius:6px;font-size:13px;cursor:pointer;">+ 🎤 唱词</button>
       <button class="fsong-add-elem" data-type="dialogue" style="margin:4px;padding:6px 14px;border:1px dashed var(--border-color);border-radius:6px;font-size:13px;cursor:pointer;">+ 💬 对白</button>
-      <button class="fsong-add-elem" data-type="ensemble" style="margin:4px;padding:6px 14px;border:1px dashed #f0c080;border-radius:6px;font-size:13px;cursor:pointer;">+ 🎼 重唱</button>
+      <button class="fsong-add-elem" data-type="ensemble" style="margin:4px;padding:6px 14px;border:1px dashed var(--card-ensemble-border);border-radius:6px;font-size:13px;cursor:pointer;">+ 🎼 重唱</button>
     </div>`;
 
     wrap.innerHTML = html;
@@ -93,9 +93,9 @@ const FloatingSongEditor = {
 
     if (elem.element_type === 'ensemble') {
       // 重唱容器：标题 + 缩进的唱词子卡 + 容器内添加唱词按钮
-      let html = `<div class="fsong-elem" data-id="${elem.id}" style="margin-bottom:8px;margin-left:${marginLeft}px;background:#fff3e0;border:1px solid #f0c080;border-radius:8px;overflow:hidden;">
+      let html = `<div class="fsong-elem" data-id="${elem.id}" style="margin-bottom:8px;margin-left:${marginLeft}px;background:var(--card-ensemble-bg);border:1px solid var(--card-ensemble-border);border-radius:8px;overflow:hidden;">
         <div style="display:flex;align-items:center;padding:6px 10px;gap:8px;font-size:12px;border-bottom:1px solid var(--border-color);">
-          <span style="font-size:13px;font-weight:bold;color:#c8801a;">🎼 重唱（多人同时唱不同的词）</span>
+          <span style="font-size:13px;font-weight:bold;color:var(--ensemble-text);">🎼 重唱（多人同时唱不同的词）</span>
           <span style="flex:1;"></span>
           ${delBtn}
         </div>
