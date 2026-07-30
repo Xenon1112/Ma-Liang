@@ -1,5 +1,5 @@
 """版本信息：构建/打包时由 pyproject.toml 同步"""
-__version__ = "0.1.0b1"
+__version__ = "0.1.0b2"
 
 
 def get_version():
