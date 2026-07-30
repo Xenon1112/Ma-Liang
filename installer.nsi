@@ -3,7 +3,7 @@
 
 !define APP_NAME "马良"
 !define APP_EXE "novel-writer.exe"
-!define APP_VERSION "0.0.2"
+!define APP_VERSION "0.1.0b1"
 !define APP_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\${APP_EXE}"
 !define UNINSTALL_REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
