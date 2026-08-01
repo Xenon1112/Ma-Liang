@@ -2,7 +2,7 @@
 name = "novel-writer"
 version = "0.1.0b2"
 description = "马良 - 小说/剧本写作桌面工具（标准库 HTTP + pywebview + SQLite）"
-license = "MIT"
+license = "GPL-3.0-or-later"
 requires-python = ">=3.10"
 dependencies = [
     "python-docx>=1.0",
