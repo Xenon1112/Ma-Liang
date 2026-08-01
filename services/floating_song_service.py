@@ -73,9 +73,14 @@ def update_floating_song(id, data):
 def delete_floating_song(id):
     # 物理删除（与剧本元素一致）；唱词由 FK 级联删除
     conn = get_conn()
+    row = conn.execute("SELECT project_id, score_file FROM floating_songs WHERE id = ?", (id,)).fetchone()
     conn.execute("DELETE FROM floating_songs WHERE id = ?", (id,))
     conn.commit()
     conn.close()
+    # 歌曲删除时一并清理挂载的乐谱文件
+    if row and row["score_file"]:
+        from services import score_service
+        score_service.discard_score_file(row["project_id"], row["score_file"])
 
 # ====== 唱词 ======
 
@@ -169,6 +174,10 @@ def move_to_scene(floating_song_id, scene_id):
                 "element_type": l["element_type"] if l["element_type"] in ("lyric", "dialogue") else "lyric",
                 "content": l["content"], "character_ids": ids,
             })
+    # 乐谱随歌曲转移到正文（先改名挂在新的 song 元素上，再删游离歌曲，避免文件被清理）
+    if song["score_file"]:
+        from services import score_service
+        score_service.transfer_score(song["project_id"], song["score_file"], element_id=new_song["id"])
     delete_floating_song(floating_song_id)
     return new_song
 
@@ -230,6 +239,12 @@ def move_to_floating(element_id):
                 "song_id": new_song["id"], "element_type": ch["element_type"],
                 "content": ch["content"], "character_ids": singers[ch["id"]],
             })
+
+    # 乐谱随歌曲转移到游离歌曲（先改名挂到新行，再删原元素，避免文件被清理）
+    if song["score_file"]:
+        from services import score_service
+        score_service.transfer_score(
+            _project_of_element(element_id), song["score_file"], floating_song_id=new_song["id"])
 
     # 删除原歌曲（子元素随 delete_element 删除）
     from services.script_service import delete_element

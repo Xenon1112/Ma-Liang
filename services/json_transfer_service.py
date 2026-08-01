@@ -1,4 +1,5 @@
 import json
+import base64
 from database import get_conn, row_to_dict
 from services.export_service import _resolve_output_path
 
@@ -113,6 +114,14 @@ def _build_export_payload(conn, project_id, include_deleted=False):
             r["parent_id"] = None
         if r.get("character_id") not in char_ids:
             r["character_id"] = None
+        # 乐谱文件 base64 内嵌；文件丢失则清掉悬空引用
+        if r.get("score_file"):
+            from services import score_service
+            data = score_service.read_score_bytes(project_id, r["score_file"])
+            if data is not None:
+                r["score_b64"] = base64.b64encode(data).decode("ascii")
+            else:
+                r["score_file"] = None
     payload["script_elements"] = elements
 
     s_chars = _fetch_all(conn, """
@@ -141,7 +150,7 @@ def _build_export_payload(conn, project_id, include_deleted=False):
         lyrics = _fetch_all(conn,
             "SELECT id, parent_id, element_type, content, character_ids, sort_order FROM floating_lyrics WHERE song_id = ? ORDER BY sort_order, id",
             (s["id"],))
-        floating.append({
+        song_dict = {
             "song_title": s["song_title"],
             "sort_order": s["sort_order"],
             "lyrics": [{
@@ -154,7 +163,14 @@ def _build_export_payload(conn, project_id, include_deleted=False):
                 "character_ids": [i for i in _parse_ids(l["character_ids"]) if i in char_ids],
                 "sort_order": l["sort_order"],
             } for l in lyrics],
-        })
+        }
+        # 乐谱文件 base64 内嵌；文件丢失则不导出
+        if s.get("score_file"):
+            from services import score_service
+            data = score_service.read_score_bytes(project_id, s["score_file"])
+            if data is not None:
+                song_dict["score_b64"] = base64.b64encode(data).decode("ascii")
+        floating.append(song_dict)
     payload["floating_songs"] = floating
     return payload
 
@@ -279,9 +295,29 @@ def import_project_json(payload):
         smap = _insert_rows(conn, "scenes", _rows(payload, "scenes"),
                             {"act_id": amap, "project_id": pmap},
                             required=("act_id", "project_id"))
-        emap = _insert_rows(conn, "script_elements", _rows(payload, "script_elements"),
+        elem_rows = _rows(payload, "script_elements")
+        # 乐谱：抽出内嵌的 base64（不参与列插入），无内嵌数据的行清掉悬空的 score_file
+        elem_score_b64 = {}
+        for r in elem_rows:
+            b = r.pop("score_b64", None)
+            if b and r.get("id") is not None:
+                elem_score_b64[r["id"]] = b
+            elif r.get("score_file"):
+                r["score_file"] = None
+        emap = _insert_rows(conn, "script_elements", elem_rows,
                             {"scene_id": smap, "character_id": hmap},
                             required=("scene_id",), self_field="parent_id")
+        # 按新 id 写回乐谱文件并更新 score_file 列
+        if elem_score_b64:
+            from services import score_service
+            for old_id, b in elem_score_b64.items():
+                new_id = emap.get(old_id)
+                if new_id is None:
+                    continue
+                filename = score_service.write_score_file(
+                    new_project_id, f"element_{new_id}.mscz", base64.b64decode(b))
+                conn.execute("UPDATE script_elements SET score_file = ? WHERE id = ?",
+                             (filename, new_id))
         _insert_rows(conn, "scene_characters", _rows(payload, "scene_characters"),
                      {"scene_id": smap, "character_id": hmap},
                      required=("scene_id", "character_id"))
@@ -298,6 +334,14 @@ def import_project_json(payload):
             cur = conn.execute(
                 "INSERT INTO floating_songs (project_id, song_title, sort_order) VALUES (?, ?, ?)",
                 (new_project_id, s.get("song_title") or "未命名歌曲", s.get("sort_order", 0)))
+            # 乐谱：内嵌的 base64 写回文件并更新 score_file 列
+            if s.get("score_b64"):
+                from services import score_service
+                filename = score_service.write_score_file(
+                    new_project_id, f"floating_{cur.lastrowid}.mscz",
+                    base64.b64decode(s["score_b64"]))
+                conn.execute("UPDATE floating_songs SET score_file = ? WHERE id = ?",
+                             (filename, cur.lastrowid))
             # 先插全部行（parent_id 暂置 NULL）并建立 旧id→新id 映射，再统一回写 parent_id
             lyric_map = {}
             pending_parent = []

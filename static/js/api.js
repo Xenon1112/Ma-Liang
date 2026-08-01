@@ -174,6 +174,13 @@ const api = {
     moveToScene: (id, sceneId) => api._post(`/api/floating-songs/${id}/move-to-scene`, { sceneId }),
   },
 
+  score: {
+    get: (params) => api._get('/api/score', params),
+    open: (data) => api._post('/api/score/open', data),
+    remove: (data) => api._post('/api/score/delete', data),
+    detectPath: () => api._get('/api/score/detect-path'),
+  },
+
   app: {
     getConfig: () => api._get('/api/config'),
     setConfig: (fields) => api._put('/api/config', fields),

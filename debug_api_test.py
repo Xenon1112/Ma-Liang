@@ -29,8 +29,9 @@ def call(method, path, data=None, expect=200):
         return text
 
 import app as appmod
-sys.argv = ["app.py", "--no-browser", "--port", "5290"]
-t = threading.Thread(target=appmod.main, daemon=True)
+from database import init_db
+init_db()
+t = threading.Thread(target=appmod.app.run, kwargs={"host": "127.0.0.1", "port": 5290}, daemon=True)
 t.start()
 time.sleep(2.5)
 
@@ -116,6 +117,22 @@ call("GET", f"/api/elements?sceneId={scid}")
 call("PUT", f"/api/elements/{eid}", {"content": "台词改"})
 call("POST", "/api/elements/reorder", {"sceneId": scid, "parentId": None, "orderedIds": [eid]})
 call("POST", f"/api/elements/{eid}/move", {"parentId": None})
+
+print("== 乐谱（MuseScore） ==")
+mel = call("POST", "/api/elements", {"sceneId": scid, "elementType": "song", "songTitle": "测试歌曲"}, 201)
+meid = mel["id"]
+info = call("GET", f"/api/score?projectId={spid}&elementId={meid}")
+detect = call("GET", "/api/score/detect-path")
+if detect and not detect.get("current"):
+    # 无 MuseScore 环境：open 应返回 400 引导安装
+    call("POST", "/api/score/open", {"projectId": spid, "elementId": meid, "songTitle": "测试歌曲"}, 400)
+else:
+    # 有 MuseScore 环境时不实际拉起 GUI，仅验证路径探测
+    print("[OK ] 检测到 MuseScore，跳过 open 实测:", detect.get("current"))
+call("POST", "/api/score/delete", {"projectId": spid, "elementId": meid})
+fs = call("POST", "/api/floating-songs", {"projectId": spid, "songTitle": "游离测试歌"}, 201)
+call("GET", f"/api/score?projectId={spid}&floatingSongId={fs['id']}")
+call("POST", "/api/score/delete", {"projectId": spid, "floatingSongId": fs["id"]})
 
 print("== 搜索/配置/导出/备份/回收站 ==")
 import urllib.parse

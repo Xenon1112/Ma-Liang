@@ -94,6 +94,10 @@ const App = {
       Shortcuts.openSettings();
     });
 
+    document.getElementById('btn-musescore').addEventListener('click', () => {
+      ScoreHelper.openSettings();
+    });
+
     // 手动保存：小说冲刷自动保存并立即存草稿；剧本保存当前场景所有卡片
     document.getElementById('btn-save').addEventListener('click', async () => {
       if (!AppState.currentProject) { toast('请先打开一个作品'); return; }

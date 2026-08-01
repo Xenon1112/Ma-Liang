@@ -296,8 +296,14 @@ def update_element(id, data):
 
 def delete_element(id):
     conn = get_conn()
-    row = conn.execute("SELECT scene_id FROM script_elements WHERE id = ?", (id,)).fetchone()
+    row = conn.execute(
+        """SELECT e.scene_id, e.score_file, s.project_id FROM script_elements e
+           JOIN scenes s ON e.scene_id = s.id WHERE e.id = ?""", (id,)).fetchone()
     scene_id = row["scene_id"] if row else None
+    # 歌曲删除时一并清理挂载的乐谱文件
+    if row and row["score_file"]:
+        from services import score_service
+        score_service.discard_score_file(row["project_id"], row["score_file"])
     # 如果是 song 容器，级联删除子元素
     conn.execute("DELETE FROM script_elements WHERE parent_id = ?", (id,))
     conn.execute("DELETE FROM script_elements WHERE id = ?", (id,))

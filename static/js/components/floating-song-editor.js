@@ -64,6 +64,7 @@ const FloatingSongEditor = {
       <div style="display:flex;gap:12px;align-items:center;">
         <span style="font-size:16px;">🎵</span>
         <input id="fsong-title-input" value="${escAttr(song.song_title || '')}" placeholder="歌曲名" style="flex:1;font-size:16px;font-weight:bold;">
+        <button id="fsong-score-btn" title="${song.score_file ? '用 MuseScore 编辑乐谱' : '创建乐谱并用 MuseScore 编辑'}" style="padding:4px 12px;border:1px dashed ${song.score_file ? 'var(--accent)' : 'var(--border-color)'};color:${song.score_file ? 'var(--accent)' : 'var(--text-secondary)'};border-radius:4px;font-size:12px;background:transparent;cursor:pointer;">🎼 乐谱${song.score_file ? ' •' : ''}</button>
         <button id="fsong-move-btn" style="padding:4px 12px;border:1px solid var(--accent);color:var(--accent);border-radius:4px;font-size:12px;background:transparent;cursor:pointer;">挂到某场…</button>
         <button id="fsong-save-btn" style="padding:4px 12px;background:var(--accent);color:white;border-radius:4px;font-size:12px;">保存歌名</button>
       </div>
@@ -143,6 +144,18 @@ const FloatingSongEditor = {
 
     // 挂到某场（转为正文歌曲）
     wrap.querySelector('#fsong-move-btn').onclick = () => moveFloatingToScene(song.id);
+
+    // 乐谱：创建/打开（MuseScore），成功后按钮原地高亮
+    wrap.querySelector('#fsong-score-btn').onclick = async (e) => {
+      const btn = e.currentTarget;
+      const ok = await ScoreHelper.openScore({ floatingSongId: song.id, songTitle: song.song_title });
+      if (ok) {
+        song.score_file = song.score_file || '(pending)';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.color = 'var(--accent)';
+        if (!btn.textContent.endsWith('•')) btn.textContent += ' •';
+      }
+    };
 
     // 歌名保存（失焦自动保存）
     wrap.querySelector('#fsong-save-btn').onclick = async () => {

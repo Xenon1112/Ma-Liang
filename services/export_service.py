@@ -170,7 +170,8 @@ def _format_element_txt(e, indent=""):
             lines.append(_format_element_txt(c, indent + "    "))
         return "\n".join(lines)
     if t == "song":
-        lines = [f"{indent}♪ {e['song_title'] or '（未命名歌曲）'}"]
+        score_mark = "（附乐谱）" if e.get("score_file") else ""
+        lines = [f"{indent}♪ {e['song_title'] or '（未命名歌曲）'}{score_mark}"]
         for c in e.get("children", []):
             lines.append(_format_element_txt(c, indent + "    "))
         lines.append(f"{indent}（歌曲结束）")
@@ -346,7 +347,8 @@ def export_docx(chapter_id=None, project_id=None, output_path="", options=None):
                             run.add_break()
         elif t == "song":
             p = doc.add_paragraph()
-            style_run(p.add_run(f"♪ {e['song_title'] or '（未命名歌曲）'}"), "黑体", bold=True)
+            score_mark = "（附乐谱）" if e.get("score_file") else ""
+            style_run(p.add_run(f"♪ {e['song_title'] or '（未命名歌曲）'}{score_mark}"), "黑体", bold=True)
             for c in e.get("children", []):
                 add_script_element(c, in_song=True)
             # 歌曲结束标识

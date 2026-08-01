@@ -301,6 +301,11 @@ const CardEditor = {
       if (depth === 0) {
         html += `<button class="card-to-floating" data-index="${index}" title="转为游离歌曲（移出正文，仅保留在 JSON 导出）" style="font-size:12px;padding:1px 4px;border:1px dashed var(--border-color);border-radius:4px;color:var(--text-secondary);">⇱ 游离</button>`;
       }
+      // 乐谱（仅音乐剧顶层歌曲）：无乐谱时点击生成模板并调起 MuseScore
+      if (depth === 0 && isMusical) {
+        const hasScore = !!elem.score_file;
+        html += `<button class="card-score-btn" data-index="${index}" title="${hasScore ? '用 MuseScore 编辑乐谱' : '创建乐谱并用 MuseScore 编辑'}" style="font-size:12px;padding:1px 4px;border:1px dashed ${hasScore ? 'var(--accent)' : 'var(--border-color)'};border-radius:4px;color:${hasScore ? 'var(--accent)' : 'var(--text-secondary)'};">🎼 乐谱${hasScore ? ' •' : ''}</button>`;
+      }
     }
     // 重唱标识
     if (isEnsemble) {
@@ -477,6 +482,21 @@ const CardEditor = {
       btn.addEventListener('click', () => {
         const card = this.getCard(parseInt(btn.dataset.index));
         if (card) this.convertSongToFloating(card);
+      });
+    });
+
+    // 乐谱：创建/打开（MuseScore），成功后按钮原地高亮（不整树重绘，避免打断编辑）
+    wrap.querySelectorAll('.card-score-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const card = this.getCard(parseInt(btn.dataset.index));
+        if (!card) return;
+        const ok = await ScoreHelper.openScore({ elementId: card.id, songTitle: card.song_title });
+        if (ok) {
+          card.score_file = card.score_file || '(pending)';
+          btn.style.borderColor = 'var(--accent)';
+          btn.style.color = 'var(--accent)';
+          if (!btn.textContent.endsWith('•')) btn.textContent += ' •';
+        }
       });
     });
 

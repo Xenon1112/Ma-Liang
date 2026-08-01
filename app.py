@@ -52,6 +52,9 @@ from services.floating_song_service import (
     list_floating_songs, create_floating_song, update_floating_song, delete_floating_song,
     add_lyric, update_lyric, delete_lyric, move_to_scene, move_to_floating,
 )
+from services.score_service import (
+    get_score_info, open_score, delete_score, detect_musescore_path, get_musescore_path,
+)
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static", template_folder=TEMPLATES_DIR)
 
@@ -790,6 +793,46 @@ def api_move_to_scene(id):
 @app.route("/api/elements/<int:id>/move-to-floating", methods=["POST"])
 def api_move_to_floating(id):
     return jsonify(move_to_floating(id))
+
+
+# ====== Score API（歌曲乐谱，调起本机 MuseScore 编辑） ======
+
+def _score_target(data):
+    """从参数中取 projectId/elementId/floatingSongId 三元组"""
+    return (
+        data.get("projectId") or data.get("project_id"),
+        data.get("elementId") or data.get("element_id"),
+        data.get("floatingSongId") or data.get("floating_song_id"),
+    )
+
+@app.route("/api/score", methods=["GET"])
+def api_get_score():
+    return jsonify(get_score_info(
+        request.args.get("projectId", type=int),
+        request.args.get("elementId", type=int),
+        request.args.get("floatingSongId", type=int),
+    ))
+
+@app.route("/api/score/open", methods=["POST"])
+def api_open_score():
+    data = snake_json()
+    project_id, element_id, floating_song_id = _score_target(data)
+    created, path = open_score(project_id, element_id, floating_song_id, data.get("song_title"))
+    return jsonify({"opened": True, "created": created, "path": path})
+
+@app.route("/api/score/delete", methods=["POST"])
+def api_delete_score():
+    data = snake_json()
+    project_id, element_id, floating_song_id = _score_target(data)
+    delete_score(project_id, element_id, floating_song_id)
+    return jsonify({"ok": True})
+
+@app.route("/api/score/detect-path", methods=["GET"])
+def api_detect_musescore_path():
+    return jsonify({
+        "detected": detect_musescore_path(),
+        "current": get_musescore_path(),
+    })
 
 
 # ====== Main ======
