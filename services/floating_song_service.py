@@ -1,6 +1,6 @@
 import json
 
-from database import get_conn, row_to_dict, next_sort_order
+from core.database import get_conn, row_to_dict, next_sort_order
 
 # ====== 游离歌曲（音乐剧：不挂场、不进正文，仅出现在 JSON 导出） ======
 

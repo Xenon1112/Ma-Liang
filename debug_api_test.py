@@ -29,7 +29,7 @@ def call(method, path, data=None, expect=200):
         return text
 
 import app as appmod
-from database import init_db
+from core.database import init_db
 init_db()
 t = threading.Thread(target=appmod.app.run, kwargs={"host": "127.0.0.1", "port": 5290}, daemon=True)
 t.start()

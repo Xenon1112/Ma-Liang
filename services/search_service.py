@@ -1,4 +1,4 @@
-from database import get_conn, row_to_dict
+from core.database import get_conn, row_to_dict
 
 def _snippet(text, keyword, ctx=40):
     if not text: return ""

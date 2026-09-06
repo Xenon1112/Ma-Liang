@@ -1,4 +1,4 @@
-from database import get_conn, row_to_dict, next_sort_order
+from core.database import get_conn, row_to_dict, next_sort_order
 
 def list_characters(project_id):
     conn = get_conn()

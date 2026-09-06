@@ -1,4 +1,4 @@
-from database import get_conn, row_to_dict, hash_content, count_words
+from core.database import get_conn, row_to_dict, hash_content, count_words
 
 def get_current_draft(chapter_id=None, volume_id=None):
     conn = get_conn()

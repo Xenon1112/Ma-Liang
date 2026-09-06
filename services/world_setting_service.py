@@ -1,4 +1,4 @@
-from database import get_conn, row_to_dict, next_sort_order
+from core.database import get_conn, row_to_dict, next_sort_order
 
 def list_settings(project_id, category=None):
     conn = get_conn()

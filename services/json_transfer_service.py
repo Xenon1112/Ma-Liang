@@ -1,6 +1,6 @@
 import json
 import base64
-from database import get_conn, row_to_dict
+from core.database import get_conn, row_to_dict
 from services.export_service import _resolve_output_path
 
 EXPORT_APP = "novel-writer"

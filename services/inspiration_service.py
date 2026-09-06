@@ -1,4 +1,4 @@
-from database import get_conn, row_to_dict
+from core.database import get_conn, row_to_dict
 
 def list_inspirations(project_id, type=None, tag=None):
     conn = get_conn()

@@ -1,8 +1,8 @@
 import math
 from datetime import datetime, timedelta
 
-from database import get_conn, row_to_dict, soft_delete, restore_soft_delete
-from services.config_service import get_config as _get_config
+from core.database import get_conn, row_to_dict, soft_delete, restore_soft_delete
+from core.config import get_config as _get_config
 
 ENTITY_TABLES = {
     "project": "projects",

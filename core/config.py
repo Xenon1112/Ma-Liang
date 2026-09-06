@@ -1,4 +1,4 @@
-from database import get_conn
+from core.database import get_conn
 
 DEFAULTS = {
     "autoSaveInterval": "300",

@@ -1,7 +1,7 @@
 import shutil
 import os
 from datetime import datetime
-from database import get_db_path, get_conn
+from core.database import get_db_path, get_conn
 
 def create_backup(backup_path=None):
     src = get_db_path()

@@ -1,4 +1,4 @@
-from database import get_conn, row_to_dict, next_sort_order, count_words
+from core.database import get_conn, row_to_dict, next_sort_order, count_words
 
 def _get(data, snake_key, camel_key=None):
     """从 data 中取值，先找 snake_case，再找 camelCase"""

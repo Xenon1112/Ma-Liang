@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from database import get_conn, row_to_dict
+from core.database import get_conn, row_to_dict
 
 def _resolve_output_path(output_path, ext, default_name):
     """解析导出路径：留空→桌面；目录→放入默认文件名；缺扩展名→自动补全"""

@@ -5,8 +5,8 @@ import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from database import get_conn, get_user_data_dir
-from services import config_service
+from core.database import get_conn, get_user_data_dir
+from core import config as config_service
 
 # ====== 歌曲乐谱（MuseScore .mscz 文件，调起本机 MuseScore 编辑） ======
 

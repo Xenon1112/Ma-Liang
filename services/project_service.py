@@ -1,4 +1,4 @@
-from database import get_conn, row_to_dict
+from core.database import get_conn, row_to_dict
 
 def list_projects():
     conn = get_conn()
@@ -120,7 +120,7 @@ def update_project(id, data):
     return row_to_dict(row)
 
 def delete_project(id):
-    from database import soft_delete
+    from core.database import soft_delete
     conn = get_conn()
     soft_delete(conn, "projects", id)
     conn.close()

@@ -9,13 +9,13 @@ import socket
 import threading
 import webbrowser
 from pathlib import Path
-from miniframe import Flask, request, jsonify, send_from_directory
+from core.httpd import Flask, request, jsonify, send_from_directory
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _version import get_version
-from database import init_db, get_db_path, get_user_data_dir, soft_delete, get_conn
+from core.database import init_db, get_db_path, get_user_data_dir, soft_delete, get_conn
 
 # PyInstaller 打包后资源位于 sys._MEIPASS；开发时为项目根目录
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -42,7 +42,7 @@ from services.json_transfer_service import export_project_json, import_project_j
 from services.backup_service import create_backup, restore_backup, get_backup_info, list_backups
 from services.recycle_service import list_recycle, restore, permanently_delete, clean_expired
 from services.search_service import full_text
-from services.config_service import get_config, set_config
+from core.config import get_config, set_config
 from services.script_service import (
     list_acts, get_act, create_act, update_act, reorder_acts,
     list_scenes, get_scene, create_scene, update_scene, reorder_scenes, set_scene_characters,
