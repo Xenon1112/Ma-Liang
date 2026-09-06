@@ -1,0 +1,9 @@
+{
+  "id": "export",
+  "name": "导出",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry": "backend.py",
+  "legacy_routes": true,
+  "web": ["web/export-dialog.js"]
+}

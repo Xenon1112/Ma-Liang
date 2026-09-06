@@ -91,41 +91,41 @@ uv run python app.py
 
 ```
 novel-writer/
-├── app.py                      # 主入口，110+ REST API 路由 + pywebview 窗口
+├── app.py                      # 主入口 + 内核杂项路由 + 未迁移的 Script/Floating-Song/Score 路由 + pywebview 窗口
 ├── core/                       # 内核（插件化重构，业务无关）
 │   ├── httpd.py                # Flask API 子集 shim（纯标准库 http.server）
 │   ├── database.py             # SQLite 初始化 + 版本化 migration + 插件迁移框架
 │   ├── config.py               # 应用配置
 │   ├── events.py               # 后端事件总线
-│   ├── plugin_api.py           # 插件 API（插件唯一允许接触的边界）
+│   ├── plugin_api.py           # 插件 API（插件唯一允许接触的边界，含 provide/require 服务注册表）
 │   └── plugin_manager.py       # 插件发现/校验/拓扑排序/动态加载/故障隔离
 ├── _version.py                 # 版本号注入 (importlib.metadata / 打包回退)
-├── services/                   # 业务逻辑层（待逐步迁移为插件）
-│   ├── project_service.py      # 项目管理 + 分模式统计 + 目录树单请求
-│   ├── chapter_service.py      # 卷 + 章 CRUD
-│   ├── draft_service.py        # 版本管理 (SHA256 hash, LCS diff)
+├── services/                   # 待迁移的业务模块（阶段 3）
 │   ├── script_service.py       # 剧本模式 (act/scene/element CRUD, 场景字数维护)
 │   ├── floating_song_service.py # 游离歌曲 (唱词/对白/重唱, 与正文互转)
-│   ├── outline_service.py      # 大纲 (tree 构建)
-│   ├── character_service.py    # 人物 + 自定义字段 + 出场记录
-│   ├── export_service.py       # TXT / Word (.docx) 导出
-│   ├── json_transfer_service.py # 整项目 JSON 导出/导入 (不含回收站)
-│   ├── backup_service.py       # DB 备份 + 恢复
-│   ├── recycle_service.py      # 软删除 + 到期清理
-│   ├── score_service.py        # 乐谱文件管理 + 调起 MuseScore
-│   └── search_service.py       # 全文搜索 (章节/场景卡片/游离歌曲/资料)
-├── plugins/                    # 内置插件(一切皆插件重构,与第三方插件同协议)
-│   ├── inspiration/            # 灵感笔记 (plugin.json + backend.py + migrations/ + web/)
-│   └── world_setting/          # 世界观设定
+│   └── score_service.py        # 乐谱文件管理 + 调起 MuseScore
+├── plugins/                    # 内置插件（一切皆插件，与第三方插件同协议；各含 plugin.json + backend.py，按需含 migrations/ + web/）
+│   ├── project/                # 项目管理 + 分模式统计 + 目录树单请求 + JSON 导入入口
+│   ├── chapter/                # 卷章管理（含小说目录树/编辑器等前端）
+│   ├── draft/                  # 版本管理 (SHA256 hash, LCS diff)
+│   ├── outline/                # 大纲管理 (tree 构建)
+│   ├── character/              # 人物管理 (多字段编辑)
+│   ├── inspiration/            # 灵感笔记
+│   ├── world_setting/          # 世界观设定
+│   ├── search/                 # 全文搜索
+│   ├── recycle/                # 回收站 (软删除聚合/恢复/清理)
+│   ├── export/                 # TXT / Word (.docx) 导出，provide 导出路径解析
+│   ├── json_transfer/          # 整项目 JSON 导出/导入 (不含回收站)，依赖 export 插件
+│   └── backup/                 # DB 备份 + 恢复
 ├── templates/
-│   └── index.html              # 前端 SPA (三栏布局)
+│   └── index.html              # 前端 SPA (三栏布局 + 插件前端引导器)
 ├── static/
 │   ├── css/
 │   │   ├── main.css            # 全局样式 + 布局 + 卡片编辑器样式
 │   │   └── themes.css          # 三套主题变量 (light/dark/warm)
 │   └── js/
 │       ├── api.js              # REST API 封装层 (fetch)
-│       ├── app.js              # 应用入口 + 模式切换 + 工具栏
+│       ├── app.js              # 应用入口 + 模式切换 + 工具栏 + 备份对话框
 │       ├── state.js            # 前端状态管理 + 事件系统
 │       ├── shortcuts.js        # 可自定义快捷键系统
 │       ├── utils/
@@ -133,21 +133,12 @@ novel-writer/
 │       │   └── debounce.js     # 输入防抖
 │       ├── core/
 │       │   └── nw.js               # NW 命名空间 (插件挂载点 + 扩展点注册表)
-│       └── components/
+│       └── components/             # 未迁移的剧本模式组件（阶段 3 随 script/floating_song/score 迁出）
 │           ├── modal.js             # 通用弹窗
-│           ├── project-list.js      # 首页作品列表 (统计/编辑/导入)
-│           ├── sidebar.js           # 小说目录树 (卷→章, 拖拽排序/跨卷移动)
 │           ├── script-sidebar.js    # 剧本目录树 (幕→场, 拖拽排序)
-│           ├── editor.js            # 小说纯文本编辑器
-│           ├── editor-style.js      # 编辑器排版设置 (字体/字号/行距/栏宽)
 │           ├── card-editor.js       # 剧本卡片编辑器 (核心)
 │           ├── floating-song-editor.js # 游离歌曲编辑器
-│           ├── version-panel.js     # 版本历史 + diff
-│           ├── outline-tree.js      # 大纲树形编辑
-│           ├── character-panel.js   # 人物多字段编辑
-│           ├── search-panel.js      # 全局搜索
-│           ├── recycle-bin.js       # 回收站
-│           └── export-dialog.js     # 导出对话框
+│           └── score-helper.js      # 乐谱编辑辅助 (调起 MuseScore)
 ├── installer.nsi                # NSIS 安装包脚本
 ├── novel-writer.spec            # PyInstaller 单目录打包配置
 ├── novel-writer-onefile.spec    # PyInstaller 单文件打包配置 (可选)
@@ -157,11 +148,13 @@ novel-writer/
 ├── version_info.txt             # exe 版本信息资源
 ├── icon.ico                     # 应用图标 (多尺寸)
 ├── tools/                       # NSIS 工具链
+├── tests/
+│   └── run_conformance.py       # 插件协议符合性测试
 ├── debug_api_test.py            # API 全流程调试脚本
 ├── pyproject.toml               # uv 项目配置
 ├── uv.lock                      # 依赖锁定
 ├── dist/                        # 打包交付产物 (setup.exe / portable.zip)
-├── docs/                        # 新手教程 (Markdown + PDF + 真实截图)
+├── docs/                        # 新手教程 + 插件化架构/计划/协议文档
 ├── LICENSE                      # GPLv3
 └── README.md
 ```

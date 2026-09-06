@@ -10,6 +10,7 @@ from core.config import DEFAULTS as _CONFIG_DEFAULTS
 from core.database import (
     count_words,
     get_conn,
+    get_db_path,
     get_user_data_dir,
     hash_content,
     next_sort_order,
@@ -60,6 +61,10 @@ class PluginAPI:
     def db(self):
         """每请求新连接,用法与 core.database.get_conn() 相同"""
         return get_conn()
+
+    def db_path(self):
+        """当前数据库文件路径(备份/恢复插件需要)"""
+        return get_db_path()
 
     # core.database 通用 helper 透出
     row_to_dict = staticmethod(row_to_dict)

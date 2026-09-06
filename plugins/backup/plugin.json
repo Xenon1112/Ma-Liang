@@ -1,0 +1,8 @@
+{
+  "id": "backup",
+  "name": "备份恢复",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry": "backend.py",
+  "legacy_routes": true
+}

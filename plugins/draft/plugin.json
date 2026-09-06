@@ -1,0 +1,11 @@
+{
+  "id": "draft",
+  "name": "版本管理",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry": "backend.py",
+  "legacy_routes": true,
+  "dependencies": ["project"],
+  "optional_dependencies": ["chapter"],
+  "web": ["web/version-panel.js"]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "json_transfer",
+  "name": "整项目 JSON 导入导出",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry": "backend.py",
+  "legacy_routes": true,
+  "optional_dependencies": ["export"]
+}

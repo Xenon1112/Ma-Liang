@@ -1,0 +1,9 @@
+{
+  "id": "search",
+  "name": "全文搜索",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry": "backend.py",
+  "legacy_routes": true,
+  "web": ["web/search-panel.js"]
+}

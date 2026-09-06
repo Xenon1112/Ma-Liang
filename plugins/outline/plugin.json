@@ -1,0 +1,10 @@
+{
+  "id": "outline",
+  "name": "大纲管理",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry": "backend.py",
+  "legacy_routes": true,
+  "dependencies": ["project"],
+  "web": ["web/outline-tree.js"]
+}

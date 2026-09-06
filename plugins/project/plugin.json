@@ -1,0 +1,10 @@
+{
+  "id": "project",
+  "name": "项目管理",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry": "backend.py",
+  "legacy_routes": true,
+  "dependencies": ["json_transfer"],
+  "web": ["web/project-list.js"]
+}
