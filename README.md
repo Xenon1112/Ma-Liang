@@ -43,6 +43,15 @@ uv run python app.py
 
 默认打开内置桌面窗口；加 `--browser` 则用系统浏览器打开 `http://localhost:5200`
 
+## 开发约定
+
+- **所有 Python 命令一律通过 uv 执行**，不要直接调用系统 `python` / `pip`：
+  - 运行应用：`uv run python app.py`（或 `--browser`）
+  - 运行插件协议符合性测试：`uv run python tests/run_conformance.py`
+  - 打包：`uv run pyinstaller novel-writer.spec`
+  - 加依赖：`uv add <pkg>`；开发依赖：`uv add --dev <pkg>`
+- 原因：依赖由 `pyproject.toml` + `uv.lock` 锁定，`uv run` 会在执行前自动同步 `.venv`；直调系统 Python 可能用到错误解释器或缺依赖。
+
 图文新手教程见 [docs/新手教程.md](docs/新手教程.md)（另有 PDF 版）。
 
 ## 架构
@@ -64,14 +73,14 @@ uv run python app.py
 │              ↕ REST API (fetch)                      │
 ├──────────────────────────────────────────────────────┤
 │  后端（纯标准库，无 Web 框架）                          │
-│  miniframe.py — 路由 shim (http.server)              │
-│  app.py — 70+ 路由                                   │
+│  core/httpd.py — 路由 shim (http.server)               │
+│  app.py — 110+ 路由                                    │
 │  ┌──────────┬──────────┬──────────┬──────────────┐  │
 │  │ project  │ chapter  │ draft    │ script       │  │
-│  │ outline  │ character│ world    │ inspiration  │  │
-│  │ export   │ backup   │ recycle  │ search/config│  │
-│  │ json传输 │ floating │          │              │  │
+│  │ outline  │ character│ export   │ floating     │  │
+│  │ backup   │ recycle  │ search   │ json传输     │  │
 │  └──────────┴──────────┴──────────┴──────────────┘  │
+│  plugins/ — inspiration / world_setting (已插件化)     │
 │              ↕                                        │
 │  SQLite（系统用户数据目录 data.db）                     │
 │  21 张表，版本化 migration (v1→v5)                     │
@@ -82,11 +91,16 @@ uv run python app.py
 
 ```
 novel-writer/
-├── app.py                      # 主入口，70+ REST API 路由 + pywebview 窗口
-├── miniframe.py                # Flask API 子集 shim（纯标准库 http.server）
-├── database.py                 # SQLite 初始化 + 版本化 migration (v1→v5)
+├── app.py                      # 主入口，110+ REST API 路由 + pywebview 窗口
+├── core/                       # 内核（插件化重构，业务无关）
+│   ├── httpd.py                # Flask API 子集 shim（纯标准库 http.server）
+│   ├── database.py             # SQLite 初始化 + 版本化 migration + 插件迁移框架
+│   ├── config.py               # 应用配置
+│   ├── events.py               # 后端事件总线
+│   ├── plugin_api.py           # 插件 API（插件唯一允许接触的边界）
+│   └── plugin_manager.py       # 插件发现/校验/拓扑排序/动态加载/故障隔离
 ├── _version.py                 # 版本号注入 (importlib.metadata / 打包回退)
-├── services/                   # 业务逻辑层
+├── services/                   # 业务逻辑层（待逐步迁移为插件）
 │   ├── project_service.py      # 项目管理 + 分模式统计 + 目录树单请求
 │   ├── chapter_service.py      # 卷 + 章 CRUD
 │   ├── draft_service.py        # 版本管理 (SHA256 hash, LCS diff)
@@ -98,10 +112,10 @@ novel-writer/
 │   ├── json_transfer_service.py # 整项目 JSON 导出/导入 (不含回收站)
 │   ├── backup_service.py       # DB 备份 + 恢复
 │   ├── recycle_service.py      # 软删除 + 到期清理
-│   ├── search_service.py       # 全文搜索 (章节/场景卡片/游离歌曲/资料)
-│   └── config_service.py       # 应用配置
+│   ├── score_service.py        # 乐谱文件管理 + 调起 MuseScore
+│   └── search_service.py       # 全文搜索 (章节/场景卡片/游离歌曲/资料)
 ├── plugins/                    # 内置插件(一切皆插件重构,与第三方插件同协议)
-│   ├── inspiration/            # 灵感笔记 (plugin.json + backend.py + migrations/)
+│   ├── inspiration/            # 灵感笔记 (plugin.json + backend.py + migrations/ + web/)
 │   └── world_setting/          # 世界观设定
 ├── templates/
 │   └── index.html              # 前端 SPA (三栏布局)
@@ -117,6 +131,8 @@ novel-writer/
 │       ├── utils/
 │       │   ├── word-count.js   # 中文字数统计
 │       │   └── debounce.js     # 输入防抖
+│       ├── core/
+│       │   └── nw.js               # NW 命名空间 (插件挂载点 + 扩展点注册表)
 │       └── components/
 │           ├── modal.js             # 通用弹窗
 │           ├── project-list.js      # 首页作品列表 (统计/编辑/导入)
@@ -129,8 +145,6 @@ novel-writer/
 │           ├── version-panel.js     # 版本历史 + diff
 │           ├── outline-tree.js      # 大纲树形编辑
 │           ├── character-panel.js   # 人物多字段编辑
-│           ├── world-setting-panel.js
-│           ├── inspiration-panel.js
 │           ├── search-panel.js      # 全局搜索
 │           ├── recycle-bin.js       # 回收站
 │           └── export-dialog.js     # 导出对话框
