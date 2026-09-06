@@ -427,5 +427,6 @@ const BackupDialog = {
 
 // ====== 初始化 ======
 document.addEventListener('DOMContentLoaded', () => {
-  App.init();
+  // 等插件前端脚本加载完再初始化(引导脚本见 index.html,失败兜底也会 resolve)
+  (window.NW && NW.pluginsReady ? NW.pluginsReady : Promise.resolve()).then(() => App.init());
 });

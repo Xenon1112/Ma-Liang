@@ -1,6 +1,6 @@
 // ====== 灵感面板 ======
 
-const InspirationPanel = {
+NW.plugins.inspiration = {
   selectedType: null,
 
   async refresh() {
@@ -110,3 +110,7 @@ const InspirationPanel = {
     };
   },
 };
+
+// 迁移期兼容别名:未迁移组件(app.js/search-panel.js)仍用全局名引用本面板
+const InspirationPanel = NW.plugins.inspiration;
+window.InspirationPanel = InspirationPanel;

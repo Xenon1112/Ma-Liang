@@ -54,6 +54,15 @@ def init_db():
             applied_at TEXT DEFAULT (datetime('now','localtime'))
         )
     """)
+    # 插件迁移记录表(内核元表,插件管理器加载插件时也会兜底创建)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS plugin_migrations (
+            plugin_id   TEXT NOT NULL,
+            version     INTEGER NOT NULL,
+            applied_at  TEXT NOT NULL,
+            PRIMARY KEY (plugin_id, version)
+        )
+    """)
     row = conn.execute("SELECT MAX(version) as v FROM db_version").fetchone()
     current = row["v"] or 0
 

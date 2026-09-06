@@ -16,6 +16,7 @@ a = Analysis(
     datas=[
         ('templates', 'templates'),
         ('static', 'static'),
+        ('plugins', 'plugins'),
     ],
     hiddenimports=[
         'webview',
@@ -28,8 +29,6 @@ a = Analysis(
         'services.draft_service',
         'services.outline_service',
         'services.character_service',
-        'services.world_setting_service',
-        'services.inspiration_service',
         'services.export_service',
         'services.backup_service',
         'services.recycle_service',

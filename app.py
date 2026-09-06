@@ -9,7 +9,7 @@ import socket
 import threading
 import webbrowser
 from pathlib import Path
-from core.httpd import Flask, request, jsonify, send_from_directory
+from core.httpd import Flask, request, jsonify, send_from_directory, req_json, snake_json, convert_keys
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -35,8 +35,6 @@ from services.character_service import (
     list_characters, get_character, create_character, update_character,
     add_field, update_field, remove_field, reorder_fields, set_appearances,
 )
-from services.world_setting_service import list_settings, get_setting, create_setting, update_setting
-from services.inspiration_service import list_inspirations, get_inspiration, create_inspiration, update_inspiration
 from services.export_service import export_txt, export_docx
 from services.json_transfer_service import export_project_json, import_project_json
 from services.backup_service import create_backup, restore_backup, get_backup_info, list_backups
@@ -55,6 +53,7 @@ from services.floating_song_service import (
 from services.score_service import (
     get_score_info, open_score, delete_score, detect_musescore_path, get_musescore_path,
 )
+from core import plugin_manager
 
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static", template_folder=TEMPLATES_DIR)
 
@@ -119,31 +118,6 @@ def error_500(e):
 def error_value(e):
     # service 层抛出的参数/状态校验错误统一按 400 返回，消息可展示给用户
     return jsonify({"error": str(e)}), 400
-
-
-# ====== camelCase → snake_case 转换 ======
-import re
-
-def camel_to_snake(name):
-    """projectId → project_id"""
-    s = re.sub(r'([A-Z])', r'_\1', name)
-    return s.lower().lstrip('_')
-
-def convert_keys(obj):
-    """递归转换 dict 的所有 key 从 camelCase 到 snake_case"""
-    if isinstance(obj, dict):
-        return {camel_to_snake(k): convert_keys(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [convert_keys(item) for item in obj]
-    return obj
-
-def req_json():
-    """获取请求 JSON（保留原始 camelCase key）"""
-    return request.get_json(silent=True) or {}
-
-def snake_json():
-    """获取请求 JSON（转换 key 为 snake_case，供 service 调用）"""
-    return convert_keys(req_json())
 
 
 # ====== 前端页面 ======
@@ -457,63 +431,6 @@ def api_set_appearances(id):
     else:
         appearances = convert_keys(body or {}).get("appearances", [])
     set_appearances(id, appearances)
-    return jsonify({"ok": True})
-
-
-# ====== World Setting API ======
-
-@app.route("/api/world-settings", methods=["GET"])
-def api_list_settings():
-    project_id = request.args.get("projectId", type=int)
-    category = request.args.get("category")
-    return jsonify(list_settings(project_id, category))
-
-@app.route("/api/world-settings/<int:id>", methods=["GET"])
-def api_get_setting(id):
-    s = get_setting(id)
-    return jsonify(s) if s else (jsonify({"error": "not found"}), 404)
-
-@app.route("/api/world-settings", methods=["POST"])
-def api_create_setting():
-    return jsonify(create_setting(snake_json())), 201
-
-@app.route("/api/world-settings/<int:id>", methods=["PUT"])
-def api_update_setting(id):
-    return jsonify(update_setting(id, snake_json()))
-
-@app.route("/api/world-settings/<int:id>", methods=["DELETE"])
-def api_delete_setting(id):
-    conn = get_conn()
-    soft_delete(conn, "world_settings", id)
-    conn.close()
-    return jsonify({"ok": True})
-
-
-# ====== Inspiration API ======
-
-@app.route("/api/inspirations", methods=["GET"])
-def api_list_inspirations():
-    project_id = request.args.get("projectId", type=int)
-    return jsonify(list_inspirations(project_id, request.args.get("type"), request.args.get("tag")))
-
-@app.route("/api/inspirations/<int:id>", methods=["GET"])
-def api_get_inspiration(id):
-    i = get_inspiration(id)
-    return jsonify(i) if i else (jsonify({"error": "not found"}), 404)
-
-@app.route("/api/inspirations", methods=["POST"])
-def api_create_inspiration():
-    return jsonify(create_inspiration(snake_json())), 201
-
-@app.route("/api/inspirations/<int:id>", methods=["PUT"])
-def api_update_inspiration(id):
-    return jsonify(update_inspiration(id, snake_json()))
-
-@app.route("/api/inspirations/<int:id>", methods=["DELETE"])
-def api_delete_inspiration(id):
-    conn = get_conn()
-    soft_delete(conn, "inspirations", id)
-    conn.close()
     return jsonify({"ok": True})
 
 
@@ -835,6 +752,36 @@ def api_detect_musescore_path():
     })
 
 
+# ====== 插件加载 ======
+
+def _load_plugins():
+    """模块导入时即加载插件,使插件路由进入 app.routes(main() 中幂等重复调用)"""
+    try:
+        plugin_manager.discover()
+        plugin_manager.load_all(app)
+    except Exception:
+        logging.getLogger("novel-writer").exception("插件加载流程异常")
+
+_load_plugins()
+
+
+# ====== 插件前端资源 ======
+
+@app.route("/api/plugins/registry", methods=["GET"])
+def api_plugins_registry():
+    """前端引导脚本用的插件注册表(各插件 id/manifest/version/web 资源列表与状态)"""
+    return jsonify(plugin_manager.registry())
+
+
+@app.route("/plugins/<pid>/<path:filepath>", methods=["GET"])
+def plugin_web_static(pid, filepath):
+    """从插件目录 serve 前端资源;只服务已加载插件,目录穿越由 send_from_directory 拒绝(404)"""
+    plugin_dir = plugin_manager.get_plugin_dir(pid)
+    if not plugin_dir:
+        return jsonify({"error": "not found"}), 404
+    return send_from_directory(plugin_dir, filepath)
+
+
 # ====== Main ======
 
 def find_free_port(start, max_tries=100):
@@ -871,6 +818,10 @@ def main():
         print("请备份后删除该文件再重新启动，或从应用内恢复备份。详见日志："
               f"{get_user_data_dir() / 'logs' / 'app.log'}")
         sys.exit(1)
+
+    # 模块导入时已加载过插件(discover/load_all 均幂等,此处不会重复加载)
+    plugin_manager.discover()
+    plugin_manager.load_all(app)
 
     try:
         port = find_free_port(args.port)

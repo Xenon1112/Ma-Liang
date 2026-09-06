@@ -1,0 +1,9 @@
+{
+  "id": "world_setting",
+  "name": "世界观设定",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry": "backend.py",
+  "legacy_routes": true,
+  "web": ["web/world-setting-panel.js"]
+}

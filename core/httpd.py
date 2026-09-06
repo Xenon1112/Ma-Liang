@@ -144,6 +144,33 @@ class _RequestProxy:
 request = _RequestProxy()
 
 
+# ====== camelCase → snake_case 转换(请求 JSON 工具) ======
+
+def camel_to_snake(name):
+    """projectId → project_id"""
+    s = re.sub(r'([A-Z])', r'_\1', name)
+    return s.lower().lstrip('_')
+
+
+def convert_keys(obj):
+    """递归转换 dict 的所有 key 从 camelCase 到 snake_case"""
+    if isinstance(obj, dict):
+        return {camel_to_snake(k): convert_keys(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [convert_keys(item) for item in obj]
+    return obj
+
+
+def req_json():
+    """获取请求 JSON(保留原始 camelCase key)"""
+    return request.get_json(silent=True) or {}
+
+
+def snake_json():
+    """获取请求 JSON(转换 key 为 snake_case,供 service 调用)"""
+    return convert_keys(req_json())
+
+
 def _guess_type(path):
     ext = os.path.splitext(path)[1].lower()
     if ext in MIME_OVERRIDES:
@@ -168,6 +195,7 @@ def send_from_directory(directory, filename):
 
 class _Route:
     def __init__(self, rule, methods, func):
+        self.rule = rule  # 保留原始规则串,供插件路由冲突检测
         self.methods = {m.upper() for m in (methods or ["GET"])}
         if "GET" in self.methods:
             self.methods.add("HEAD")

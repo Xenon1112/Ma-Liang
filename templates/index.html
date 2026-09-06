@@ -116,6 +116,7 @@
 <script src="/static/js/utils/word-count.js?v=20260801"></script>
 <script src="/static/js/utils/debounce.js?v=20260801"></script>
 <script src="/static/js/state.js?v=20260801"></script>
+<script src="/static/js/core/nw.js?v=20260801"></script>
 <script src="/static/js/api.js?v=20260801"></script>
 <script src="/static/js/components/modal.js?v=20260801"></script>
 <script src="/static/js/components/score-helper.js?v=20260801"></script>
@@ -130,11 +131,38 @@
 <script src="/static/js/components/version-panel.js?v=20260801"></script>
 <script src="/static/js/components/outline-tree.js?v=20260801"></script>
 <script src="/static/js/components/character-panel.js?v=20260801"></script>
-<script src="/static/js/components/world-setting-panel.js?v=20260801"></script>
-<script src="/static/js/components/inspiration-panel.js?v=20260801"></script>
 <script src="/static/js/components/search-panel.js?v=20260801"></script>
 <script src="/static/js/components/recycle-bin.js?v=20260801"></script>
 <script src="/static/js/components/export-dialog.js?v=20260801"></script>
+<script>
+// ====== 插件前端引导:fetch 注册表,按序动态加载各插件的 web 脚本 ======
+// app.js 的启动等待 NW.pluginsReady,保证插件组件先于 App.init 就绪
+NW.pluginsReady = (async () => {
+  let registry;
+  try {
+    const resp = await fetch('/api/plugins/registry');
+    registry = await resp.json();
+  } catch (e) {
+    // 插件系统异常时兜底:跳过插件前端资源,应用其余部分照常启动
+    console.error('插件注册表加载失败,跳过插件前端资源', e);
+    return;
+  }
+  NW.pluginRegistry = registry;
+  for (const p of registry) {
+    if (p.status !== 'loaded' || !p.manifest || !p.manifest.web) continue;
+    for (const file of p.manifest.web) {
+      // 逐个 await onload 串行加载,保证 manifest.web 声明的依赖顺序
+      await new Promise((resolve) => {
+        const s = document.createElement('script');
+        s.src = `/plugins/${p.id}/${file}?v=${p.manifest.version}`;
+        s.onload = resolve;
+        s.onerror = () => { console.error(`插件脚本加载失败: ${s.src}`); resolve(); };
+        document.body.appendChild(s);
+      });
+    }
+  }
+})();
+</script>
 <script src="/static/js/app.js?v=20260801"></script>
 </body>
 </html>

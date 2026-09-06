@@ -94,14 +94,15 @@ novel-writer/
 │   ├── floating_song_service.py # 游离歌曲 (唱词/对白/重唱, 与正文互转)
 │   ├── outline_service.py      # 大纲 (tree 构建)
 │   ├── character_service.py    # 人物 + 自定义字段 + 出场记录
-│   ├── world_setting_service.py
-│   ├── inspiration_service.py
 │   ├── export_service.py       # TXT / Word (.docx) 导出
 │   ├── json_transfer_service.py # 整项目 JSON 导出/导入 (不含回收站)
 │   ├── backup_service.py       # DB 备份 + 恢复
 │   ├── recycle_service.py      # 软删除 + 到期清理
 │   ├── search_service.py       # 全文搜索 (章节/场景卡片/游离歌曲/资料)
 │   └── config_service.py       # 应用配置
+├── plugins/                    # 内置插件(一切皆插件重构,与第三方插件同协议)
+│   ├── inspiration/            # 灵感笔记 (plugin.json + backend.py + migrations/)
+│   └── world_setting/          # 世界观设定
 ├── templates/
 │   └── index.html              # 前端 SPA (三栏布局)
 ├── static/

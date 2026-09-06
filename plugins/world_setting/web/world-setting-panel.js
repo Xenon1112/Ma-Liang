@@ -1,6 +1,6 @@
 // ====== 世界观设定面板 ======
 
-const WorldSettingPanel = {
+NW.plugins.world_setting = {
   selectedCategory: null,
 
   async refresh() {
@@ -108,3 +108,7 @@ const WorldSettingPanel = {
     };
   },
 };
+
+// 迁移期兼容别名:未迁移组件(app.js/search-panel.js)仍用全局名引用本面板
+const WorldSettingPanel = NW.plugins.world_setting;
+window.WorldSettingPanel = WorldSettingPanel;
