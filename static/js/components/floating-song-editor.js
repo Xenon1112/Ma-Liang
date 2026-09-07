@@ -236,3 +236,8 @@ const FloatingSongEditor = {
     });
   },
 };
+
+// 生命周期事件:打开剧本/音乐剧项目时清空游离歌曲编辑器(原由 app.js 点名调用)
+NW.events.on('project.opened', ({ projectType } = {}) => {
+  if (projectType === 'play' || projectType === 'musical') FloatingSongEditor.clear();
+});

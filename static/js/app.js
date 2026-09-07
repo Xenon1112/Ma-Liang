@@ -225,17 +225,15 @@ const App = {
       document.getElementById('btn-add-volume').title = '新建幕';
       document.getElementById('btn-add-chapter').textContent = '🎬+';
       document.getElementById('btn-add-chapter').title = '新建场';
-      await ScriptSidebar.refresh();
-      CardEditor.clear();
-      FloatingSongEditor.clear();
     } else {
       document.getElementById('btn-add-volume').textContent = '📁+';
       document.getElementById('btn-add-volume').title = '新建卷';
       document.getElementById('btn-add-chapter').textContent = '📄+';
       document.getElementById('btn-add-chapter').title = '新建章';
-      await Sidebar.refresh();
-      Editor.clear();
     }
+
+    // 项目打开事件:目录树/编辑器等组件各自订阅刷新,app.js 不再点名调用(事件目录见插件协议草案 §6)
+    NW.events.emit('project.opened', { projectId: project.id, projectType: project.project_type || 'novel' });
   },
 
   closeProject() {
@@ -253,7 +251,8 @@ const App = {
     document.getElementById('toolbar-title').textContent = '马良';
     document.getElementById('sidebar-actions').style.display = 'none';
 
-    ProjectList.refresh();
+    // 项目关闭事件:作品列表等组件各自订阅处理(事件目录见插件协议草案 §6)
+    NW.events.emit('project.closed');
   },
 
   toggleFocus() {

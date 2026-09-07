@@ -183,6 +183,11 @@ function initEditorEvents() {
 const Editor = NW.plugins.chapter.editor;
 window.Editor = Editor;
 
+// 生命周期事件:打开小说项目时清空编辑器(原由 app.js 点名调用)
+NW.events.on('project.opened', ({ projectType } = {}) => {
+  if (!projectType || projectType === 'novel') Editor.clear();
+});
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initEditorEvents);
 } else {

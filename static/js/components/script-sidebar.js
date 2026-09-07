@@ -484,3 +484,8 @@ async function moveFloatingToScene(id) {
     }
   };
 }
+
+// 生命周期事件:打开剧本/音乐剧项目时自我刷新目录树(原由 app.js 点名调用)
+NW.events.on('project.opened', ({ projectType } = {}) => {
+  if (projectType === 'play' || projectType === 'musical') ScriptSidebar.refresh();
+});

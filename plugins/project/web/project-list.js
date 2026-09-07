@@ -71,6 +71,9 @@ NW.plugins.project = {
 const ProjectList = NW.plugins.project;
 window.ProjectList = ProjectList;
 
+// 生命周期事件:关闭项目返回列表页时自我刷新(原由 app.js 点名调用)
+NW.events.on('project.closed', () => ProjectList.refresh());
+
 // ====== 新建作品弹窗 ======
 
 function showNewProjectModal() {
