@@ -35,15 +35,31 @@ def _get_volume_preface(conn, vol):
     ).fetchone()
     return row["content"] if row and row["content"] else ""
 
+def _get_chapter_text(conn, chapter_id):
+    """取章节正文：正文已节点化(chapter 插件注册的 text 节点,payload.content),
+    一律过 payload 条件按 chapter_id 取(异构父约定,id 序列会撞,不能只信 parent_id 列);
+    节点缺失时回退 drafts 当前版本(未迁移/异常状态的兜底,保证导出内容不丢)"""
+    node = conn.execute(
+        """SELECT json_extract(payload, '$.content') AS content FROM graph_nodes
+           WHERE type = 'text' AND json_extract(payload, '$.chapter_id') = ?
+             AND deleted_at IS NULL ORDER BY id LIMIT 1""",
+        (chapter_id,)
+    ).fetchone()
+    if node:
+        return node["content"] or ""
+    draft = conn.execute(
+        "SELECT content FROM drafts WHERE chapter_id = ? AND is_current = 1 ORDER BY version_number DESC LIMIT 1",
+        (chapter_id,)
+    ).fetchone()
+    return draft["content"] if draft and draft["content"] else ""
+
+
 def _get_chapter_content(chapter_id):
     conn = _api.db()
     ch = conn.execute("SELECT * FROM chapters WHERE id = ? AND deleted_at IS NULL", (chapter_id,)).fetchone()
     if not ch: conn.close(); return None
     vol = conn.execute("SELECT * FROM volumes WHERE id = ? AND deleted_at IS NULL", (ch["volume_id"],)).fetchone()
-    draft = conn.execute(
-        "SELECT * FROM drafts WHERE chapter_id = ? AND is_current = 1 ORDER BY version_number DESC LIMIT 1",
-        (chapter_id,)
-    ).fetchone()
+    content = _get_chapter_text(conn, chapter_id)
     # 章节在所属卷内的序号（未删除章节中按 sort_order 排第几）
     idx_row = conn.execute(
         "SELECT COUNT(*) + 1 AS n FROM chapters WHERE volume_id = ? AND deleted_at IS NULL AND sort_order < ?",
@@ -56,19 +72,27 @@ def _get_chapter_content(chapter_id):
         "volumePreface": preface,
         "chapterTitle": ch["title"],
         "chapterIndex": idx_row["n"],
-        "content": draft["content"] if draft else "",
+        "content": content,
     }
 
 def _get_project_contents(project_id):
     conn = _api.db()
     volumes = conn.execute("SELECT * FROM volumes WHERE project_id = ? AND deleted_at IS NULL ORDER BY sort_order", (project_id,)).fetchall()
+    # 正文节点一次取回(text 节点,payload.content;过 payload 条件,不信 parent_id 列)
+    text_map = {r["chapter_id"]: (r["content"] or "") for r in conn.execute(
+        """SELECT json_extract(payload, '$.chapter_id') AS chapter_id,
+                  json_extract(payload, '$.content') AS content
+           FROM graph_nodes
+           WHERE project_id = ? AND type = 'text' AND deleted_at IS NULL ORDER BY id""",
+        (project_id,)).fetchall() if r["chapter_id"] is not None}
     result = []
     for vol in volumes:
         chapters = conn.execute("SELECT * FROM chapters WHERE volume_id = ? AND deleted_at IS NULL ORDER BY sort_order", (vol["id"],)).fetchall()
         ch_contents = []
         for ch_idx, ch in enumerate(chapters):
-            draft = conn.execute("SELECT * FROM drafts WHERE chapter_id = ? AND is_current = 1 ORDER BY version_number DESC LIMIT 1", (ch["id"],)).fetchone()
-            ch_contents.append({"index": ch_idx + 1, "title": ch["title"], "content": draft["content"] if draft else ""})
+            # 节点缺失时回退 drafts 当前版本(兜底,见 _get_chapter_text)
+            content = text_map[ch["id"]] if ch["id"] in text_map else _get_chapter_text(conn, ch["id"])
+            ch_contents.append({"index": ch_idx + 1, "title": ch["title"], "content": content})
         result.append({
             "volumeTitle": vol["title"],
             "volumePreface": _get_volume_preface(conn, vol),

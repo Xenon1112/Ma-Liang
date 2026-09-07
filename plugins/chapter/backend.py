@@ -1,6 +1,22 @@
-"""卷章管理插件:数据访问 + 路由注册(原 services/chapter_service.py 与 app.py 卷/章路由迁移而来)"""
+"""卷章管理插件:数据访问 + 路由注册(原 services/chapter_service.py 与 app.py 卷/章路由迁移而来)
+
+G4 起章节正文节点化:每章一个 graph_nodes 的 text 节点(type='text',
+parent_id 列 = 章节 id 的异构父约定,payload = {"chapter_id", "content"}),
+存量正文(实际存于 drafts 表当前版本,chapters 表从未有过 content 列)
+由 migrations/002_content_nodes.sql 迁入,drafts 表保留作回滚底牌。
+按章节定位节点一律过 payload 的 chapter_id 条件,不能只信 parent_id 列。
+"""
 
 _api = None  # activate 时注入的 PluginAPI
+
+
+def _graph_svc():
+    """取 graph 插件服务;manifest 已声明硬依赖,缺失属加载期事故"""
+    svc = _api.require("graph")
+    if svc is None:
+        raise RuntimeError("graph 插件未加载")
+    return svc
+
 
 # ====== Volumes ======
 
@@ -78,9 +94,15 @@ def create_chapter(data):
         "INSERT INTO chapters (volume_id, project_id, title, sort_order) VALUES (?, ?, ?, ?)",
         (data["volume_id"], data["project_id"], data["title"], order)
     )
+    chapter_id = cur.lastrowid
     conn.commit()
-    row = conn.execute("SELECT * FROM chapters WHERE id = ?", (cur.lastrowid,)).fetchone()
+    row = conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
     conn.close()
+    # 同步创建空 text 节点(正文节点化:parent_id 列 = 章节 id,sort_order 与章节一致)
+    _graph_svc()["create_node"]({
+        "project_id": data["project_id"], "type": "text", "parent_id": chapter_id,
+        "sort_order": order, "payload": {"chapter_id": chapter_id, "content": ""},
+    })
     return _api.row_to_dict(row)
 
 def update_chapter(id, data):
@@ -132,6 +154,49 @@ class Plugin:
             "get_volume": get_volume,
             "get_chapter": get_chapter,
         })
+
+        # 登记正文节点类型(类型注册表由 graph 插件提供;依赖在 manifest 声明,先加载)
+        graph = api.require("graph")
+        if graph is None:
+            raise RuntimeError("graph 插件未加载,无法注册正文节点类型")
+        graph["register_node_type"]("text", {
+            "label": "正文",
+            "payload_schema": {
+                "chapter_id": "int 所属章节(异构父,chapters 是表不是节点)",
+                "content": "str 章节正文",
+            },
+        })
+
+        # 回收站联动:章节被恢复时恢复正文节点,被彻底清除时物理删除节点
+        # (回收站通过事件通知,不认识任何具体插件,保持解耦)
+        def _on_recycle_restored(entity, id, **_):
+            if entity != "chapter":
+                return
+            conn = _api.db()
+            try:
+                conn.execute(
+                    "UPDATE graph_nodes SET deleted_at = NULL WHERE type = 'text' AND json_extract(payload, '$.chapter_id') = ?",
+                    (id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        def _on_recycle_purged(entity, id, **_):
+            if entity != "chapter":
+                return
+            conn = _api.db()
+            try:
+                conn.execute(
+                    "DELETE FROM graph_nodes WHERE type = 'text' AND json_extract(payload, '$.chapter_id') = ?",
+                    (id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        api.on("recycle.restored", _on_recycle_restored)
+        api.on("recycle.purged", _on_recycle_purged)
 
         # ====== Volume API ======
 
@@ -208,7 +273,16 @@ class Plugin:
         @api.route("/api/chapters/<int:id>", methods=["DELETE"])
         def api_delete_chapter(id):
             conn = api.db()
+            # 同事务软删章节及其正文节点
+            # (按 payload chapter_id 直删单行:不用 graph 的级联 soft_delete_node——
+            #  parent_id 是异构父约定,text 节点无合法子节点,级联遍历可能误伤
+            #  parent_id 数值碰巧相同的其他类型节点)
             api.soft_delete(conn, "chapters", id)
+            conn.execute(
+                "UPDATE graph_nodes SET deleted_at = datetime('now','localtime') "
+                "WHERE type = 'text' AND json_extract(payload, '$.chapter_id') = ? AND deleted_at IS NULL",
+                (id,))
+            conn.commit()
             conn.close()
             return api.jsonify({"ok": True})
 

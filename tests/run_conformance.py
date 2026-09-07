@@ -9,6 +9,10 @@
 - graph 地基插件(内置形态拷入):加载/迁移、/api/plugins/graph/ 前缀路由、
   类型注册表(重复注册抛错)、create_node 拒绝未注册类型、
   创建→list_children→reorder→级联软删全链路
+- G4a chapter 插件正文 text 节点化(连带依赖链 json_transfer/project 拷入):
+  预置老库种子数据(空章/长文/软删章,正文存 drafts 当前版本)后加载,
+  验证 text 类型注册、002 迁移内容与软删携带、SQL 重放幂等、
+  新建章节自动建空节点/删除章节级联软删节点的读写回环、get/list 返回形状不变
 - 前端扩展点(sidebar.tabs/toolbar.actions/事件订阅/graph 渲染器注册表):子进程跑
   tests/web_stub_test.js(node),node 不可用时跳过并提示
 """
@@ -105,6 +109,37 @@ def main():
     # graph 地基插件(内置形态,同样无 legacy_routes):拷入临时目录验证加载/迁移/服务
     shutil.copytree(Path(__file__).resolve().parent.parent / "plugins" / "graph",
                     plugins_dir / "graph")
+    # G4a chapter 插件(内置形态)及其依赖链:chapter → project → json_transfer
+    for dep_pid in ("json_transfer", "project", "chapter"):
+        shutil.copytree(Path(__file__).resolve().parent.parent / "plugins" / dep_pid,
+                        plugins_dir / dep_pid)
+
+    # 模拟老库升级:先建全量内核表(init_db 幂等),预置两卷四章(空章/长文/软删章),
+    # 正文存 drafts 当前版本(chapters 表本无 content 列),再由 chapter 002 迁移迁入 graph_nodes
+    database.init_db()
+    conn = get_conn()
+    seed_pid = conn.execute("INSERT INTO projects (title) VALUES ('G4a 种子')").lastrowid
+    seed_v1 = conn.execute(
+        "INSERT INTO volumes (project_id, title, sort_order) VALUES (?, '卷一', 1)", (seed_pid,)).lastrowid
+    seed_v2 = conn.execute(
+        "INSERT INTO volumes (project_id, title, sort_order) VALUES (?, '卷二', 2)", (seed_pid,)).lastrowid
+    seed_long_text = "长文段落\n" * 3000
+    conn.execute("INSERT INTO chapters (volume_id, project_id, title, sort_order) VALUES (?, ?, '第一章', 1)",
+                 (seed_v1, seed_pid))
+    conn.execute("INSERT INTO chapters (volume_id, project_id, title, sort_order) VALUES (?, ?, '空章', 2)",
+                 (seed_v1, seed_pid))
+    conn.execute("INSERT INTO chapters (volume_id, project_id, title, sort_order) VALUES (?, ?, '长文章', 1)",
+                 (seed_v2, seed_pid))
+    conn.execute("INSERT INTO chapters (volume_id, project_id, title, sort_order, deleted_at) "
+                 "VALUES (?, ?, '软删章', 2, datetime('now','localtime'))", (seed_v2, seed_pid))
+    # 第一章留两个版本,当前为 v2(验证取 is_current 且版本号最大者)
+    conn.execute("INSERT INTO drafts (chapter_id, content, version_number, is_current) VALUES (1, '第一章旧版', 1, 0)")
+    conn.execute("INSERT INTO drafts (chapter_id, content, version_number, is_current) VALUES (1, '第一章正文v2', 2, 1)")
+    conn.execute("INSERT INTO drafts (chapter_id, content, version_number, is_current) VALUES (3, ?, 1, 1)",
+                 (seed_long_text,))
+    conn.execute("INSERT INTO drafts (chapter_id, content, version_number, is_current) VALUES (4, '软删章正文', 1, 1)")
+    conn.commit()
+    conn.close()
 
     app = Flask("conformance")
 
@@ -271,6 +306,101 @@ def main():
           graph_prefix_error is not None and "/api/plugins/graph/" in graph_prefix_error,
           str(graph_prefix_error))
 
+    # --- G4a:chapter 插件正文 text 节点化 ---
+    chapter_reg = reg.get("chapter", {})
+    check("chapter 插件加载成功", chapter_reg.get("status") == "loaded", str(chapter_reg))
+
+    conn = get_conn()
+    chapter_mig2 = conn.execute(
+        "SELECT version FROM plugin_migrations WHERE plugin_id='chapter' AND version=2"
+    ).fetchone()
+    text_nodes = [dict(r) for r in conn.execute(
+        "SELECT * FROM graph_nodes WHERE type = 'text' ORDER BY id").fetchall()]
+    conn.close()
+    check("chapter 002 迁移已记录", chapter_mig2 is not None)
+
+    text_meta = graph_svc["get_node_type"]("text") if graph_svc else None
+    check("chapter 注册 text 节点类型(label 正文,归属 chapter)",
+          text_meta is not None and text_meta["label"] == "正文"
+          and text_meta["plugin_id"] == "chapter", str(text_meta))
+
+    by_chapter = {}
+    for n in text_nodes:
+        p = json.loads(n["payload"] or "{}")
+        by_chapter[p.get("chapter_id")] = (n, p)
+    check("迁移只迁正文非空章节(空章无节点),软删章也迁",
+          sorted(by_chapter.keys()) == [1, 3, 4], str(sorted(by_chapter.keys())))
+    n1 = by_chapter.get(1)
+    check("第一章节点取当前版本正文(异构父 parent_id=章节 id)",
+          n1 is not None and n1[1] == {"chapter_id": 1, "content": "第一章正文v2"}
+          and n1[0]["parent_id"] == 1 and n1[0]["project_id"] == seed_pid,
+          str(n1))
+    n3 = by_chapter.get(3)
+    check("长文章节点内容逐字节一致",
+          n3 is not None and n3[1]["content"] == seed_long_text,
+          str(n3 and len(n3[1]["content"])))
+    n4 = by_chapter.get(4)
+    check("软删章节点携带 deleted_at",
+          n4 is not None and n4[1]["content"] == "软删章正文"
+          and n4[0]["deleted_at"] is not None, str(n4))
+
+    # 002 SQL 手动重放:NOT EXISTS 判重保证行数不变(迁移自身幂等)
+    mig2_sql = (Path(__file__).resolve().parent.parent
+                / "plugins" / "chapter" / "migrations" / "002_content_nodes.sql"
+                ).read_text(encoding="utf-8")
+    conn = get_conn()
+    before_replay = conn.execute(
+        "SELECT COUNT(*) AS c FROM graph_nodes WHERE type = 'text'").fetchone()["c"]
+    for stmt in mig2_sql.split(";"):
+        stmt = stmt.strip()
+        if stmt:
+            conn.execute(stmt)
+    conn.commit()
+    after_replay = conn.execute(
+        "SELECT COUNT(*) AS c FROM graph_nodes WHERE type = 'text'").fetchone()["c"]
+    conn.close()
+    check("002 迁移 SQL 重放幂等(行数不变)",
+          before_replay == after_replay, f"{before_replay}->{after_replay}")
+
+    # 读写回环:直接调 chapter 插件模块函数与路由处理函数(不经 HTTP)
+    chapter_mod = sys.modules.get("nw_plugin_chapter")
+    check("chapter 模块已进入 sys.modules", chapter_mod is not None)
+    if chapter_mod and graph_svc:
+        new_ch = chapter_mod.create_chapter(
+            {"volume_id": seed_v1, "project_id": seed_pid, "title": "新建章"})
+        new_node_id = chapter_mod._find_text_node_id(new_ch["id"])
+        new_node = graph_svc["get_node"](new_node_id) if new_node_id else None
+        check("新建章节自动创建空 text 节点(parent_id=章节 id,sort_order 一致)",
+              new_node is not None and new_node["parent_id"] == new_ch["id"]
+              and new_node["payload"] == {"chapter_id": new_ch["id"], "content": ""}
+              and new_node["sort_order"] == new_ch["sort_order"], str(new_node))
+
+        chapter_keys = {"id", "volume_id", "project_id", "title", "sort_order", "status",
+                        "word_count", "created_at", "updated_at", "deleted_at"}
+        got = chapter_mod.get_chapter(1)
+        listed = chapter_mod.list_chapters(seed_v1)
+        check("get_chapter/list_chapters 返回形状不变(无 content 字段)",
+              got is not None and set(got.keys()) == chapter_keys
+              and all(set(c.keys()) == chapter_keys for c in listed),
+              str(got and sorted(got.keys())))
+
+        del_func = next((r.func for r in app.routes
+                         if r.rule == "/api/chapters/<int:id>" and "DELETE" in r.methods), None)
+        check("chapter 删除路由已注册", del_func is not None)
+        if del_func:
+            del_func(new_ch["id"])
+            check("删除章节后章节软删(get 不可见)",
+                  chapter_mod.get_chapter(new_ch["id"]) is None)
+            check("删除章节级联软删 text 节点",
+                  graph_svc["get_node"](new_node_id) is None
+                  and chapter_mod._find_text_node_id(new_ch["id"]) is None)
+
+    # 供下方迁移重跑段对比:text 节点总行数(含软删)
+    conn = get_conn()
+    text_total_pre_rerun = conn.execute(
+        "SELECT COUNT(*) AS c FROM graph_nodes WHERE type = 'text'").fetchone()["c"]
+    conn.close()
+
 
     # --- 实体注册表 ---
     entities = consumer.list_entities()
@@ -410,10 +540,18 @@ def main():
     graph_count = conn.execute(
         "SELECT COUNT(*) AS c FROM plugin_migrations WHERE plugin_id='graph'"
     ).fetchone()["c"]
+    chapter_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM plugin_migrations WHERE plugin_id='chapter'"
+    ).fetchone()["c"]
+    text_total_post_rerun = conn.execute(
+        "SELECT COUNT(*) AS c FROM graph_nodes WHERE type = 'text'").fetchone()["c"]
     conn.close()
     check("迁移幂等(重复加载不重复记录)", count == 1, f"count={count}")
     check("km_counter 迁移幂等", km_count == 1, f"count={km_count}")
     check("graph 迁移幂等", graph_count == 1, f"count={graph_count}")
+    check("chapter 迁移幂等(001/002 各记录一次)", chapter_count == 2, f"count={chapter_count}")
+    check("重跑加载后 text 节点数不变", text_total_post_rerun == text_total_pre_rerun,
+          f"{text_total_pre_rerun}->{text_total_post_rerun}")
 
     # --- 前端扩展点桩测试(node,无头环境无法跑真实 DOM) ---
     node = shutil.which("node")

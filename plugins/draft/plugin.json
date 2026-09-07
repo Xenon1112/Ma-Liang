@@ -6,6 +6,6 @@
   "entry": "backend.py",
   "legacy_routes": true,
   "dependencies": ["project"],
-  "optional_dependencies": ["chapter"],
+  "optional_dependencies": ["chapter", "graph"],
   "web": ["web/version-panel.js"]
 }

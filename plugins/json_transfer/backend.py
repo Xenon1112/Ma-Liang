@@ -29,6 +29,9 @@ payload 键即表名;"project" 根键(单对象、导入时标题加副本后缀
   _entity_hook 显式调用)
 - 乐谱文件 base64 内嵌(score 插件,graph_nodes payload 的 score_file
   与 floating_songs 的 score_file 列)
+- 章节正文 text 节点(chapter 插件;正文已迁入 graph_nodes,导出文件不含节点,
+  正文仍随 drafts 行搬运,格式逐字节不变;导入时在定制段按 chapters×drafts
+  当前版本为每章生成 text 节点,让副本项目立即可用)
 
 两个跨插件边界:
 - 导出文件路径解析复用 export 插件 provide 的 resolve_output_path,
@@ -360,6 +363,34 @@ def import_project_json(payload):
         vmap = id_maps.get("volume", {})
         cmap = id_maps.get("chapter", {})
         hmap = id_maps.get("character", {})
+
+        # 章节正文已节点化(chapter 插件注册的 text 节点,payload={chapter_id, content},
+        # 列 parent_id 置章节 id 的异构父约定):chapters 走声明式主循环导入后,
+        # 在此为每个导入的章节生成对应 text 节点,正文取该章当前草稿(is_current=1,
+        # 多个 current 取版本号最大者,与运行时查询口径一致),无草稿则为空正文;
+        # 章节本身带软删标记的,节点同样置 deleted_at,保证副本项目立即可用且口径一致
+        ch_rows = {r.get("id"): r for r in _rows(payload, "chapters") if isinstance(r, dict)}
+        current_draft = {}
+        for d in _rows(payload, "drafts"):
+            if not isinstance(d, dict) or d.get("chapter_id") is None or not d.get("is_current"):
+                continue
+            prev = current_draft.get(d["chapter_id"])
+            if prev is None or (d.get("version_number") or 0) > (prev.get("version_number") or 0):
+                current_draft[d["chapter_id"]] = d
+        for old_id, new_id in cmap.items():
+            ch = ch_rows.get(old_id) or {}
+            d = current_draft.get(old_id)
+            node_payload = json.dumps(
+                {"chapter_id": new_id, "content": (d.get("content") or "") if d else ""},
+                ensure_ascii=False)
+            cols = ["project_id", "type", "parent_id", "sort_order", "payload"]
+            vals = [new_project_id, "text", new_id, ch.get("sort_order") or 0, node_payload]
+            if ch.get("deleted_at"):
+                cols.append("deleted_at")
+                vals.append(ch["deleted_at"])
+            conn.execute(
+                f"INSERT INTO graph_nodes ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                vals)
 
         amap = _insert_rows(conn, "acts", _rows(payload, "acts"),
                             {"project_id": pmap}, required=("project_id",))

@@ -2,9 +2,60 @@
 
 保存前的目标校验(章/卷是否存在)依赖 chapter 插件 provide 的查询函数,
 运行时通过 api.require("chapter") 获取,避免插件间直接 import。
+
+G4 起章节正文的当前值落在 graph_nodes 的 text 节点
+(type='text',parent_id 列=章 id,payload={"chapter_id": X, "content": ...}),
+本插件按 payload 条件直读直写该表(SQL 层,不走 require("graph"));
+drafts 表保留全部历史快照,卷首语(volume 路径)不进节点、维持原样。
 """
+import json
 
 _api = None  # activate 时注入的 PluginAPI
+
+# ====== 章节 text 节点读写(G4:章节正文当前值 = text 节点 payload.content) ======
+
+def _text_node_rows(conn, chapter_id):
+    """按 payload 条件查章的 text 节点(不信 parent_id 列,节点 id 与其他表 id 会撞)"""
+    return conn.execute(
+        "SELECT id, payload FROM graph_nodes "
+        "WHERE type = 'text' AND json_extract(payload, '$.chapter_id') = ? "
+        "AND deleted_at IS NULL ORDER BY id",
+        (chapter_id,)).fetchall()
+
+def _text_node_content(conn, chapter_id):
+    """章的当前正文;无 text 节点返回 None(调用方回退 drafts 当前版本)"""
+    rows = _text_node_rows(conn, chapter_id)
+    if not rows:
+        return None
+    try:
+        return json.loads(rows[0]["payload"] or "{}").get("content", "")
+    except ValueError:
+        return ""
+
+def _sync_text_node(conn, chapter_id, content):
+    """把章的 text 节点正文同步为 content;无节点则按 G4 布局补建(幂等,内容一致时不写)"""
+    rows = _text_node_rows(conn, chapter_id)
+    if not rows:
+        ch = conn.execute("SELECT project_id FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
+        if ch is None:
+            return
+        conn.execute(
+            "INSERT INTO graph_nodes (project_id, type, parent_id, sort_order, payload) "
+            "VALUES (?, 'text', ?, 1, ?)",
+            (ch["project_id"], chapter_id,
+             json.dumps({"chapter_id": chapter_id, "content": content}, ensure_ascii=False)))
+        return
+    for row in rows:
+        try:
+            old = json.loads(row["payload"] or "{}").get("content", "")
+        except ValueError:
+            old = None
+        if old != content:
+            conn.execute(
+                "UPDATE graph_nodes SET payload = ?, updated_at = datetime('now','localtime') "
+                "WHERE id = ?",
+                (json.dumps({"chapter_id": chapter_id, "content": content}, ensure_ascii=False),
+                 row["id"]))
 
 def get_current_draft(chapter_id=None, volume_id=None):
     conn = _api.db()
@@ -20,8 +71,14 @@ def get_current_draft(chapter_id=None, volume_id=None):
         ).fetchone()
     else:
         row = None
+    current = _api.row_to_dict(row)
+    # 章路径:正文当前值以 text 节点为准(G4);无节点回退 current 版本内容(迁移前/兜底)
+    if chapter_id and current is not None:
+        node_content = _text_node_content(conn, chapter_id)
+        if node_content is not None:
+            current["content"] = node_content
     conn.close()
-    return _api.row_to_dict(row)
+    return current
 
 def save_draft(data):
     conn = _api.db()
@@ -48,6 +105,9 @@ def save_draft(data):
         current = _api.row_to_dict(row)
 
         if current and current.get("content_hash") == new_hash:
+            # hash 命中不插新版本;仍同步一次 text 节点(节点缺失/漂移时自愈,内容一致则不写)
+            if chapter_id:
+                _sync_text_node(conn, chapter_id, content)
             conn.commit()
             return current
 
@@ -66,6 +126,8 @@ def save_draft(data):
         # 更新 word_count
         if chapter_id:
             conn.execute("UPDATE chapters SET word_count = ?, updated_at = datetime('now','localtime') WHERE id = ?", (total, chapter_id))
+            # G4:章节正文当前值同步进 text 节点(与 drafts 同事务)
+            _sync_text_node(conn, chapter_id, content)
 
         conn.commit()
         row = conn.execute("SELECT * FROM drafts WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -178,11 +240,11 @@ def delete_draft(draft_id):
     if row and row["is_current"]:
         if row["chapter_id"]:
             nxt = conn.execute(
-                "SELECT id FROM drafts WHERE chapter_id = ? ORDER BY version_number DESC LIMIT 1",
+                "SELECT id, content FROM drafts WHERE chapter_id = ? ORDER BY version_number DESC LIMIT 1",
                 (row["chapter_id"],)).fetchone()
         else:
             nxt = conn.execute(
-                "SELECT id FROM drafts WHERE volume_id = ? ORDER BY version_number DESC LIMIT 1",
+                "SELECT id, content FROM drafts WHERE volume_id = ? ORDER BY version_number DESC LIMIT 1",
                 (row["volume_id"],)).fetchone()
         if nxt:
             conn.execute("UPDATE drafts SET is_current = 1 WHERE id = ?", (nxt["id"],))
@@ -191,9 +253,13 @@ def delete_draft(draft_id):
                 conn.execute(
                     "UPDATE chapters SET word_count = (SELECT word_count FROM drafts WHERE id = ?) WHERE id = ?",
                     (nxt["id"], row["chapter_id"]))
+                # G4:text 节点正文同步到新 current
+                _sync_text_node(conn, row["chapter_id"], nxt["content"] or "")
         elif row["chapter_id"]:
             # 草稿删光，章节字数归零
             conn.execute("UPDATE chapters SET word_count = 0 WHERE id = ?", (row["chapter_id"],))
+            # G4:无 current 版本,text 节点正文清空(节点保留,章节本体还在)
+            _sync_text_node(conn, row["chapter_id"], "")
     conn.commit()
     conn.close()
 

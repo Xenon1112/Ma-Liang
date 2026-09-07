@@ -73,6 +73,8 @@ def restore(entity_type, id):
             # _require_deleted 可能抛 ValueError，finally 保证连接关闭（否则 Windows 上泄漏的连接会锁定 WAL 文件）
             _require_deleted(conn, entry[0], id)
             _api.restore_soft_delete(conn, entry[0], id)
+            # 通知所有插件:某实体被恢复(如 chapter 据此恢复正文节点;回收站本身不认识任何具体插件)
+            _api.emit("recycle.restored", entity=entity_type, id=id)
     finally:
         conn.close()
 
@@ -84,6 +86,7 @@ def permanently_delete(entity_type, id):
             _require_deleted(conn, entry[0], id)
             conn.execute(f"DELETE FROM {entry[0]} WHERE id = ?", (id,))
             conn.commit()
+            _api.emit("recycle.purged", entity=entity_type, id=id)
     finally:
         conn.close()
 
@@ -91,14 +94,20 @@ def clean_expired():
     conn = _api.db()
     retention_days = _retention_days()
     total = 0
+    purged = []
     for etype, (table, name_col) in _entity_tables().items():
-        cur = conn.execute(
-            f"DELETE FROM {table} WHERE deleted_at IS NOT NULL AND datetime(deleted_at, '+' || ? || ' days') < datetime('now','localtime')",
+        rows = conn.execute(
+            f"SELECT id FROM {table} WHERE deleted_at IS NOT NULL AND datetime(deleted_at, '+' || ? || ' days') < datetime('now','localtime')",
             (retention_days,)
-        )
-        total += cur.rowcount
+        ).fetchall()
+        for r in rows:
+            conn.execute(f"DELETE FROM {table} WHERE id = ?", (r["id"],))
+            purged.append((etype, r["id"]))
+        total += len(rows)
     conn.commit()
     conn.close()
+    for etype, pid in purged:
+        _api.emit("recycle.purged", entity=etype, id=pid)
     return total
 
 

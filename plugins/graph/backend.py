@@ -167,15 +167,23 @@ def reorder(project_id, parent_id, ordered_ids):
 
 
 def soft_delete_node(id):
-    """软删节点及其全部后代(子孙一并软删,避免孤儿悬空);返回软删行数"""
+    """软删节点及其全部后代(子孙一并软删,避免孤儿悬空);返回软删行数
+
+    注意:parent_id 是异构父约定(可能是章节/场景等外部表 id,与节点 id 同数值空间),
+    遍历必须按 visited 集合去重,否则「节点 id 恰等于其 parent_id」会自成环导致死循环。
+    """
     conn = _api.db()
     ids = [id]
+    visited = {id}
     i = 0
     while i < len(ids):
         rows = conn.execute(
             "SELECT id FROM graph_nodes WHERE parent_id = ? AND deleted_at IS NULL",
             (ids[i],)).fetchall()
-        ids.extend(r["id"] for r in rows)
+        for r in rows:
+            if r["id"] not in visited:
+                visited.add(r["id"])
+                ids.append(r["id"])
         i += 1
     placeholders = ",".join("?" * len(ids))
     cur = conn.execute(

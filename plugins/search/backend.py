@@ -28,13 +28,19 @@ def full_text(project_id, keyword, types=None):
     kw = f"%{keyword}%"
 
     if "chapter" in types:
+        # 章节正文已节点化(chapter 插件注册的 text 节点,payload.content;过 payload 条件按
+        # chapter_id 关联,不信 parent_id 列);节点缺失时回退 drafts 当前版本兜底。
+        # 取数口径:节点优先,COALESCE 保证与迁移前 drafts 直查结果一致
         rows = conn.execute("""
-            SELECT c.id, c.title, v.title AS volume_title, d.content
+            SELECT c.id, c.title, v.title AS volume_title,
+                   COALESCE(json_extract(t.payload, '$.content'), d.content) AS content
             FROM chapters c
             JOIN volumes v ON c.volume_id = v.id
+            LEFT JOIN graph_nodes t ON t.type = 'text' AND t.deleted_at IS NULL
+                AND json_extract(t.payload, '$.chapter_id') = c.id
             LEFT JOIN drafts d ON d.chapter_id = c.id AND d.is_current = 1
             WHERE c.project_id = ? AND c.deleted_at IS NULL AND v.deleted_at IS NULL
-            AND (c.title LIKE ? OR d.content LIKE ?)
+            AND (c.title LIKE ? OR COALESCE(json_extract(t.payload, '$.content'), d.content) LIKE ?)
         """, (project_id, kw, kw)).fetchall()
         for r in rows:
             results.append({"type": "chapter", "id": r["id"], "title": r["title"],
