@@ -1,6 +1,7 @@
 // 乐谱（MuseScore）共享逻辑：打开乐谱、未安装引导、MuseScore 路径设置弹窗
 // 供 CardEditor（正文歌曲卡片）与 FloatingSongEditor（游离歌曲）共用
-const ScoreHelper = {
+// (G3 由 static/js/components/score-helper.js 迁入,逻辑不变;末尾留 window 别名)
+NW.plugins.score = {
 
   // 打开某首歌曲的乐谱；target 为 { elementId } 或 { floatingSongId }，外加 songTitle
   async openScore(target) {
@@ -19,7 +20,7 @@ const ScoreHelper = {
     }
   },
 
-  // MuseScore 路径设置弹窗（配置存 app_config 的 musescorePath）
+  // MuseScore 路径设置弹窗（配置存 app_config 的 musescorePath,写入仍走内核 /api/config）
   async openSettings() {
     const [config, detect] = await Promise.all([api.app.getConfig(), api.score.detectPath()]);
 
@@ -70,3 +71,6 @@ const ScoreHelper = {
     };
   },
 };
+
+const ScoreHelper = NW.plugins.score;
+window.ScoreHelper = ScoreHelper;

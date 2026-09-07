@@ -1,3 +1,22 @@
+"""乐谱插件:歌曲乐谱管理 + 本机 MuseScore 集成(原 services/score_service.py 与 app.py Score 路由迁移而来)
+
+存储格局:
+- 乐谱不是独立实体,挂在歌曲上:正文歌曲节点的 score_file 在 graph_nodes payload(json_set 读写,
+  G2a 起),游离歌曲的 score_file 是 floating_songs 列(表归 floating 插件),本插件无自有表,
+  故无 migrations 目录,也不 register_entity。
+- 乐谱文件(.mscz)存用户数据目录 scores/<project_id>/ 下。
+
+配置:
+- musescorePath 是无前缀 legacy 键:本插件只用 api.get_config 读(迁移期允许);
+  写入仍走内核 /api/config(前端设置弹窗原样,core.config.set_config 无前缀限制),
+  因此不需要插件自有设置路由,键名与行为均不变。
+
+对外 provide "score" 服务(乐谱文件读写/清理/转移):
+- json_transfer 插件导入导出时 base64 内嵌/写回(read_score_bytes/write_score_file);
+- script 插件删元素时清理乐谱文件(discard_score_file);
+- 歌曲正文↔游离互转时改名转移(transfer_score,由 floating_song 插件消费)。
+消费方一律运行时 api.require("score") 取用,缺失时按「无乐谱数据」降级。
+"""
 import json
 import shutil
 import subprocess
@@ -6,8 +25,7 @@ import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-from core.database import get_conn, get_user_data_dir
-from core import config as config_service
+_api = None  # activate 时注入的 PluginAPI
 
 # ====== 歌曲乐谱（MuseScore .mscz 文件，调起本机 MuseScore 编辑） ======
 
@@ -123,14 +141,6 @@ _MSCX_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
             <durationType>measure</durationType>
             <duration>4/4</duration>
             </Rest>
-          </voice>
-        </Measure>
-      <Measure>
-        <voice>
-          <Rest>
-            <durationType>measure</durationType>
-            <duration>4/4</duration>
-            </Rest>
           <BarLine>
             <subtype>end</subtype>
             </BarLine>
@@ -152,7 +162,7 @@ _CONTAINER_XML = """<?xml version="1.0" encoding="UTF-8"?>
 
 
 def _scores_dir(project_id):
-    d = get_user_data_dir() / "scores" / str(project_id)
+    d = _api.data_dir / "scores" / str(project_id)
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -184,7 +194,7 @@ def detect_musescore_path():
 
 def get_musescore_path():
     """配置优先，其次自动探测；均失败返回 None"""
-    configured = (config_service.get_config().get("musescorePath") or "").strip()
+    configured = (_api.get_config("musescorePath") or "").strip()
     if configured and Path(configured).exists():
         return configured
     return detect_musescore_path()
@@ -248,7 +258,7 @@ def _score_abs_path(project_id, filename):
 
 
 def get_score_info(project_id, element_id=None, floating_song_id=None):
-    conn = get_conn()
+    conn = _api.db()
     table, row = _locate_song(conn, project_id, element_id, floating_song_id)
     conn.close()
     filename = row["score_file"]
@@ -267,7 +277,7 @@ def open_score(project_id, element_id=None, floating_song_id=None, song_title=No
     if not musescore:
         raise ValueError("未找到 MuseScore。请先从 musescore.org 安装 MuseScore 4，或在设置中配置 MuseScore 路径")
 
-    conn = get_conn()
+    conn = _api.db()
     table, row = _locate_song(conn, project_id, element_id, floating_song_id)
     created = False
     filename = row["score_file"]
@@ -285,7 +295,7 @@ def open_score(project_id, element_id=None, floating_song_id=None, song_title=No
 
 
 def delete_score(project_id, element_id=None, floating_song_id=None):
-    conn = get_conn()
+    conn = _api.db()
     table, row = _locate_song(conn, project_id, element_id, floating_song_id)
     filename = row["score_file"]
     if filename:
@@ -316,7 +326,7 @@ def transfer_score(project_id, filename, element_id=None, floating_song_id=None)
     dst = _score_abs_path(project_id, new_name)
     if src != dst:
         src.replace(dst)
-    conn = get_conn()
+    conn = _api.db()
     # 正文歌曲在 graph_nodes(score_file 在 payload),游离歌曲在 floating_songs(score_file 列)
     if element_id:
         conn.execute(
@@ -344,3 +354,57 @@ def write_score_file(project_id, filename, data):
     path = _score_abs_path(project_id, filename)
     path.write_bytes(data)
     return filename
+
+
+# ====== 路由（原 app.py Score API 节,URL/请求响应形状不变） ======
+
+def _score_target(data):
+    """从参数中取 projectId/elementId/floatingSongId 三元组"""
+    return (
+        data.get("projectId") or data.get("project_id"),
+        data.get("elementId") or data.get("element_id"),
+        data.get("floatingSongId") or data.get("floating_song_id"),
+    )
+
+
+class Plugin:
+    def activate(self, api):
+        global _api
+        _api = api
+
+        # 对外提供乐谱文件服务,跨插件消费方(json_transfer/script/floating)运行时再取,避免加载顺序耦合
+        api.provide("score", {
+            "read_score_bytes": read_score_bytes,
+            "write_score_file": write_score_file,
+            "discard_score_file": discard_score_file,
+            "transfer_score": transfer_score,
+        })
+
+        @api.route("/api/score", methods=["GET"])
+        def api_get_score():
+            return api.jsonify(get_score_info(
+                api.request.args.get("projectId", type=int),
+                api.request.args.get("elementId", type=int),
+                api.request.args.get("floatingSongId", type=int),
+            ))
+
+        @api.route("/api/score/open", methods=["POST"])
+        def api_open_score():
+            data = api.snake_json()
+            project_id, element_id, floating_song_id = _score_target(data)
+            created, path = open_score(project_id, element_id, floating_song_id, data.get("song_title"))
+            return api.jsonify({"opened": True, "created": created, "path": path})
+
+        @api.route("/api/score/delete", methods=["POST"])
+        def api_delete_score():
+            data = api.snake_json()
+            project_id, element_id, floating_song_id = _score_target(data)
+            delete_score(project_id, element_id, floating_song_id)
+            return api.jsonify({"ok": True})
+
+        @api.route("/api/score/detect-path", methods=["GET"])
+        def api_detect_musescore_path():
+            return api.jsonify({
+                "detected": detect_musescore_path(),
+                "current": get_musescore_path(),
+            })

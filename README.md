@@ -100,9 +100,6 @@ novel-writer/
 │   ├── plugin_api.py           # 插件 API（插件唯一允许接触的边界，含 provide/require 服务注册表）
 │   └── plugin_manager.py       # 插件发现/校验/拓扑排序/动态加载/故障隔离
 ├── _version.py                 # 版本号注入 (importlib.metadata / 打包回退)
-├── services/                   # 待迁移的业务模块（阶段 3）
-│   ├── floating_song_service.py # 游离歌曲 (唱词/对白/重唱, 与正文互转)
-│   └── score_service.py        # 乐谱文件管理 + 调起 MuseScore
 ├── plugins/                    # 内置插件（一切皆插件，与第三方插件同协议；各含 plugin.json + backend.py，按需含 migrations/ + web/）
 │   ├── project/                # 项目管理 + 分模式统计 + 目录树单请求 + JSON 导入入口
 │   ├── chapter/                # 卷章管理（含小说目录树/编辑器等前端）
@@ -114,6 +111,8 @@ novel-writer/
 │   ├── search/                 # 全文搜索
 │   ├── graph/                  # 内容节点地基 (graph_nodes + 类型注册表)
 │   ├── script/                 # 剧本模式 (act/scene/卡片 CRUD; 卡片存 graph_nodes, 场景字数维护)
+│   ├── score/                  # 乐谱管理 + 调起本机 MuseScore (provide 乐谱文件服务)
+│   ├── floating_song/          # 游离歌曲 (唱词/对白/重唱, 与正文互转; 仅音乐剧, 不进回收站)
 │   ├── recycle/                # 回收站 (软删除聚合/恢复/清理)
 │   ├── export/                 # TXT / Word (.docx) 导出，provide 导出路径解析
 │   ├── json_transfer/          # 整项目 JSON 导出/导入 (不含回收站)，依赖 export 插件
@@ -135,11 +134,8 @@ novel-writer/
 │       ├── core/
 │       │   └── nw.js               # NW 命名空间 (插件挂载点 + 扩展点注册表)
 │       └── components/             # 未迁移的剧本模式组件（阶段 3 随 script/floating_song/score 迁出）
-│           ├── modal.js             # 通用弹窗
-│           ├── script-sidebar.js    # 剧本目录树 (幕→场, 拖拽排序)
-│           ├── card-editor.js       # 剧本卡片编辑器 (核心)
 │           ├── floating-song-editor.js # 游离歌曲编辑器
-│           └── score-helper.js      # 乐谱编辑辅助 (调起 MuseScore)
+│           └── modal.js                # 通用弹窗
 ├── installer.nsi                # NSIS 安装包脚本
 ├── novel-writer.spec            # PyInstaller 单目录打包配置
 ├── novel-writer-onefile.spec    # PyInstaller 单文件打包配置 (可选)

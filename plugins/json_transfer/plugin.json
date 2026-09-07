@@ -5,5 +5,5 @@
   "api_version": 1,
   "entry": "backend.py",
   "legacy_routes": true,
-  "optional_dependencies": ["export"]
+  "optional_dependencies": ["export", "score"]
 }

@@ -28,8 +28,6 @@ a = Analysis(
         'core.config',
         'core.database',
         'core.httpd',
-        'services.floating_song_service',
-        'services.score_service',
     ],
     hookspath=[],
     hooksconfig={},

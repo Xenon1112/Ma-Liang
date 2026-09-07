@@ -1,0 +1,9 @@
+{
+  "id": "score",
+  "name": "乐谱",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry": "backend.py",
+  "legacy_routes": true,
+  "web": ["web/score-helper.js"]
+}

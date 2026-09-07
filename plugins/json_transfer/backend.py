@@ -23,9 +23,11 @@ payload 键即表名;"project" 根键(单对象、导入时标题加副本后缀
 - acts/scenes/scene_characters/element_characters/script_config(script 插件;
   剧作元素本体已迁入 graph_nodes,本插件把节点 payload 展开/组装回旧 script_elements
   行形状做导入导出,导出文件格式不变,旧导出文件仍可导入)
-- floating_songs/floating_lyrics(services/floating_song_service,嵌套 lyrics
-  结构与 character_ids JSON 拼接字段,默认处理器表达不了)
-- 乐谱文件 base64 内嵌(services/score_service,graph_nodes payload 的 score_file
+- floating_songs/floating_lyrics(floating_song 插件注册的 export_hook/import_hook,
+  嵌套 lyrics 结构与 character_ids JSON 拼接,默认处理器表达不了;为保持导出文件键序
+  逐字节不变,该实体 export=False 不进声明式主循环,由下方定制段在固定位置经
+  _entity_hook 显式调用)
+- 乐谱文件 base64 内嵌(score 插件,graph_nodes payload 的 score_file
   与 floating_songs 的 score_file 列)
 
 两个跨插件边界:
@@ -53,6 +55,21 @@ def _resolve_output_path(output_path, ext, default_name):
     if export_svc is None:
         raise ExportPluginUnavailable("export 插件未加载")
     return export_svc["resolve_output_path"](output_path, ext, default_name)
+
+
+def _score_svc():
+    """score 插件 provide 的乐谱文件服务;未加载返回 None,调用方按「乐谱文件丢失」降级"""
+    return _api.require("score")
+
+
+def _entity_hook(entity, kind):
+    """按 entity 名从实体注册表取定制钩子(export_hook/import_hook)。
+    供 floating_song 等 export=False 的实体在定制段固定位置显式调用用;
+    插件未加载时返回 None,调用方按「无数据」降级"""
+    for info in _api.list_entities():
+        if info["entity"] == entity:
+            return info.get(kind)
+    return None
 
 
 def _fetch_all(conn, sql, params):
@@ -184,10 +201,10 @@ def _build_export_payload(conn, project_id, include_deleted=False):
             r["parent_id"] = None
         if r.get("character_id") not in char_ids:
             r["character_id"] = None
-        # 乐谱文件 base64 内嵌；文件丢失则清掉悬空引用
+        # 乐谱文件 base64 内嵌；文件丢失(或 score 插件未加载)则清掉悬空引用
         if r.get("score_file"):
-            from services import score_service
-            data = score_service.read_score_bytes(project_id, r["score_file"])
+            svc = _score_svc()
+            data = svc["read_score_bytes"](project_id, r["score_file"]) if svc else None
             if data is not None:
                 r["score_b64"] = base64.b64encode(data).decode("ascii")
             else:
@@ -210,37 +227,14 @@ def _build_export_payload(conn, project_id, include_deleted=False):
 
     payload["script_config"] = _fetch_all(conn, "SELECT * FROM script_config WHERE project_id = ?", pid)
 
-    # 游离歌曲（独立顶层键；lyrics 为扁平结构，parent_id 引用同歌内其他行的 id；
-    # 不进正文/TXT/DOCX，仅音乐剧有数据）
-    from services.floating_song_service import _parse_ids
-    floating = []
-    fs_rows = _fetch_all(conn, f"SELECT * FROM floating_songs WHERE project_id = ?{nd} ORDER BY sort_order", pid)
-    for s in fs_rows:
-        lyrics = _fetch_all(conn,
-            "SELECT id, parent_id, element_type, content, character_ids, sort_order FROM floating_lyrics WHERE song_id = ? ORDER BY sort_order, id",
-            (s["id"],))
-        song_dict = {
-            "song_title": s["song_title"],
-            "sort_order": s["sort_order"],
-            "lyrics": [{
-                # 保留原行 id 供同歌内 parent_id 引用
-                "id": l["id"],
-                "parent_id": l["parent_id"],
-                "element_type": l["element_type"] or "lyric",
-                "content": l["content"],
-                # 过滤指向已排除角色的悬空引用
-                "character_ids": [i for i in _parse_ids(l["character_ids"]) if i in char_ids],
-                "sort_order": l["sort_order"],
-            } for l in lyrics],
-        }
-        # 乐谱文件 base64 内嵌；文件丢失则不导出
-        if s.get("score_file"):
-            from services import score_service
-            data = score_service.read_score_bytes(project_id, s["score_file"])
-            if data is not None:
-                song_dict["score_b64"] = base64.b64encode(data).decode("ascii")
-        floating.append(song_dict)
-    payload["floating_songs"] = floating
+    # 游离歌曲（独立顶层键；由 floating_song 插件注册的 export_hook 产出,
+    # 在此固定位置调用以保持导出文件键序逐字节不变;插件未加载时退化为空数组）
+    fs_hook = _entity_hook("floating_song", "export_hook")
+    if fs_hook:
+        extra = fs_hook(conn, project_id, id_sets, include_deleted)
+        payload["floating_songs"] = (extra or {}).get("floating_songs", [])
+    else:
+        payload["floating_songs"] = []
     return payload
 
 
@@ -433,14 +427,14 @@ def import_project_json(payload):
                     """UPDATE graph_nodes SET parent_id = ?,
                            payload = json_set(payload, '$.parent_id', ?) WHERE id = ?""",
                     (new_parent, new_parent, new_id))
-        # 按新 id 写回乐谱文件并更新 payload 的 score_file
-        if elem_score_b64:
-            from services import score_service
+        # 按新 id 写回乐谱文件并更新 payload 的 score_file(score 插件未加载则跳过,score_file 保持 NULL)
+        score_svc = _score_svc()
+        if elem_score_b64 and score_svc:
             for old_id, b in elem_score_b64.items():
                 new_id = emap.get(old_id)
                 if new_id is None:
                     continue
-                filename = score_service.write_score_file(
+                filename = score_svc["write_score_file"](
                     new_project_id, f"element_{new_id}.mscz", base64.b64decode(b))
                 conn.execute(
                     "UPDATE graph_nodes SET payload = json_set(payload, '$.score_file', ?) WHERE id = ?",
@@ -454,39 +448,11 @@ def import_project_json(payload):
         for row in _rows(payload, "script_config"):
             conn.execute("INSERT INTO script_config (project_id, script_type) VALUES (?, ?)",
                          (new_project_id, row.get("script_type", "play")))
-        # 游离歌曲（独立键；老导出文件无此键时视为空）
-        for s in _rows(payload, "floating_songs"):
-            if not isinstance(s, dict):
-                raise ValueError("导出文件格式不正确：floating_songs 存在非法行")
-            cur = conn.execute(
-                "INSERT INTO floating_songs (project_id, song_title, sort_order) VALUES (?, ?, ?)",
-                (new_project_id, s.get("song_title") or "未命名歌曲", s.get("sort_order", 0)))
-            # 乐谱：内嵌的 base64 写回文件并更新 score_file 列
-            if s.get("score_b64"):
-                from services import score_service
-                filename = score_service.write_score_file(
-                    new_project_id, f"floating_{cur.lastrowid}.mscz",
-                    base64.b64decode(s["score_b64"]))
-                conn.execute("UPDATE floating_songs SET score_file = ? WHERE id = ?",
-                             (filename, cur.lastrowid))
-            # 先插全部行（parent_id 暂置 NULL）并建立 旧id→新id 映射，再统一回写 parent_id
-            lyric_map = {}
-            pending_parent = []
-            for l in (s.get("lyrics") or []):
-                # 演唱者 id 重映射到新角色；悬空引用丢弃
-                ids = [hmap[i] for i in (l.get("character_ids") or []) if i in hmap]
-                lcur = conn.execute(
-                    "INSERT INTO floating_lyrics (song_id, element_type, character_id, character_ids, content, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
-                    (cur.lastrowid, l.get("element_type") or "lyric", ids[0] if ids else None,
-                     json.dumps(ids, ensure_ascii=False), l.get("content", ""), l.get("sort_order", 0)))
-                if l.get("id") is not None:
-                    lyric_map[l["id"]] = lcur.lastrowid
-                if l.get("parent_id") is not None:
-                    pending_parent.append((lcur.lastrowid, l["parent_id"]))
-            for new_id, old_parent in pending_parent:
-                # 悬空 parent_id（父行未导出）置 NULL，退回顶层
-                conn.execute("UPDATE floating_lyrics SET parent_id = ? WHERE id = ?",
-                             (lyric_map.get(old_parent), new_id))
+        # 游离歌曲（独立键；由 floating_song 插件注册的 import_hook 处理,
+        # 老导出文件无此键时钩子内部视为空;插件未加载则跳过）
+        fs_import = _entity_hook("floating_song", "import_hook")
+        if fs_import:
+            id_maps["floating_song"] = fs_import(conn, payload, id_maps, new_project_id) or {}
         conn.commit()
         return _api.row_to_dict(conn.execute(
             "SELECT * FROM projects WHERE id = ?", (new_project_id,)).fetchone())

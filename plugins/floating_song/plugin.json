@@ -1,11 +1,11 @@
 {
-  "id": "script",
-  "name": "剧本",
+  "id": "floating_song",
+  "name": "游离歌曲",
   "version": "1.0.0",
   "api_version": 1,
   "entry": "backend.py",
   "legacy_routes": true,
   "dependencies": ["project", "graph"],
   "optional_dependencies": ["score"],
-  "web": ["web/script-sidebar.js", "web/card-editor.js"]
+  "web": ["web/floating-song-editor.js"]
 }

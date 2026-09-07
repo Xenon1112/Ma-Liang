@@ -411,10 +411,11 @@ def delete_element(id):
                   json_extract(payload, '$.score_file') AS score_file, project_id
            FROM graph_nodes WHERE id = ?""", (id,)).fetchone()
     scene_id = row["scene_id"] if row else None
-    # 歌曲删除时一并清理挂载的乐谱文件
+    # 歌曲删除时一并清理挂载的乐谱文件(乐谱文件服务由 score 插件 provide)
     if row and row["score_file"]:
-        from services import score_service
-        score_service.discard_score_file(row["project_id"], row["score_file"])
+        score_svc = _api.require("score")
+        if score_svc:
+            score_svc["discard_score_file"](row["project_id"], row["score_file"])
     ids = [id] + _element_descendant_ids(conn, id)
     placeholders = ",".join("?" * len(ids))
     # 旧表靠外键级联清 element_characters,graph_nodes 不是其外键目标,手动清

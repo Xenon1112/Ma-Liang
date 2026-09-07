@@ -133,10 +133,13 @@ def cmd_seed(args):
     c.execute("INSERT INTO floating_lyrics (song_id, content, sort_order) VALUES (2,'废歌词',1)")
     conn.commit()
     conn.close()
-    # 乐谱文件(APPDATA 已指向 workdir,落在临时目录)
-    from services import score_service
-    score_service.write_score_file(2, "element_9001.mscz", b"fake-mscz-bytes")
-    score_service.write_score_file(2, "floating_9001.mscz", b"fake-floating-score")
+    # 乐谱文件(APPDATA 已指向 workdir,落在临时目录);G3 起实现在 score 插件,加载插件后取用
+    import app as _app  # noqa: F401  (导入即 discover+load_all,activate 注入 _api)
+    score_mod = sys.modules.get("nw_plugin_score")
+    if score_mod is None or getattr(score_mod, "_api", None) is None:
+        raise RuntimeError("score 插件未加载成功")
+    score_mod.write_score_file(2, "element_9001.mscz", b"fake-mscz-bytes")
+    score_mod.write_score_file(2, "floating_9001.mscz", b"fake-floating-score")
     print(f"种子库已建: {db_file} (项目 1=小说, 2=音乐剧)")
 
 

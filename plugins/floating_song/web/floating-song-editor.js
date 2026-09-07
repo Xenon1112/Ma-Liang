@@ -2,7 +2,8 @@
 // 元素模型与正文一致：顶层 lyrics 为 lyric/dialogue/ensemble 三种元素，
 // ensemble 为重唱容器，children 内嵌唱词子卡（parent_id 指向容器 id）。
 
-const FloatingSongEditor = {
+NW.plugins.floating_song = NW.plugins.floating_song || {};
+NW.plugins.floating_song.editor = {
   currentSong: null,
   characterList: [],
 
@@ -236,6 +237,10 @@ const FloatingSongEditor = {
     });
   },
 };
+
+// 迁移期兼容别名:未迁移组件(script-sidebar.js/search-panel.js 等)仍用全局名引用本组件
+const FloatingSongEditor = NW.plugins.floating_song.editor;
+window.FloatingSongEditor = FloatingSongEditor;
 
 // 生命周期事件:打开剧本/音乐剧项目时清空游离歌曲编辑器(原由 app.js 点名调用)
 NW.events.on('project.opened', ({ projectType } = {}) => {
