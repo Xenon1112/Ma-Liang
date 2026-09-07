@@ -1,6 +1,7 @@
 // ====== 剧本目录树（幕→场）======
 
-const ScriptSidebar = {
+NW.plugins.script = NW.plugins.script || {};
+NW.plugins.script.sidebar = {
   actData: [],
   collapsedActs: {},
 
@@ -484,6 +485,10 @@ async function moveFloatingToScene(id) {
     }
   };
 }
+
+// 迁移期兼容别名:未迁移组件(app.js/search-panel.js/floating-song-editor.js 等)仍用全局名引用本组件
+const ScriptSidebar = NW.plugins.script.sidebar;
+window.ScriptSidebar = ScriptSidebar;
 
 // 生命周期事件:打开剧本/音乐剧项目时自我刷新目录树(原由 app.js 点名调用)
 NW.events.on('project.opened', ({ projectType } = {}) => {

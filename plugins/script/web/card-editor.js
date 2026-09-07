@@ -1,6 +1,7 @@
 // ====== 卡片编辑器 ======
 
-const CardEditor = {
+NW.plugins.script = NW.plugins.script || {};
+NW.plugins.script.cardEditor = {
   elements: [],
   flatElements: [],
   currentSceneId: null,
@@ -232,7 +233,18 @@ const CardEditor = {
     this.bindEvents(wrap, isMusical, scene);
   },
 
+  // 按卡片类型分发到 graph 渲染器注册表;六个类型的渲染器统一委托 _renderCardHtml(注册见文件末尾)
   renderCard(elem, index, isMusical, depth) {
+    const graph = NW.plugins.graph;
+    const renderer = graph && (graph.getRenderer(elem.element_type) || graph.getRenderer('action'));
+    if (renderer) return renderer.render(this, elem, index, isMusical, depth);
+    // 兜底:注册表不可用时走原实现(正常不会发生,script 依赖 graph,引导器按依赖序加载)
+    return this._renderCardHtml(elem, index, isMusical, depth);
+  },
+
+  // 卡片渲染原实现:六种类型的差异(头部控件/角色选择/容器子元素)在本函数内按类型分支交错,
+  // 拆不成六套独立渲染,故注册表的六个类型渲染器统一委托本函数
+  _renderCardHtml(elem, index, isMusical, depth) {
     const selected = index === this.selectedCardIndex ? 'border-color:var(--accent);box-shadow:0 0 0 2px var(--accent);' : '';
     const typeConfig = {
       action: { icon: '🎬', label: '动作', bg: 'var(--bg-tertiary)', border: 'var(--border-color)' },
@@ -708,6 +720,23 @@ const CardEditor = {
     }
   },
 };
+
+// ====== graph 渲染器注册:剧本六种卡片类型 ======
+// 各类型渲染差异在 _renderCardHtml 内部按类型分支交错(共享头部/尾部,差异在控件与子容器),
+// 六个类型共用同一渲染实现;render 签名在注册表约定的 render(container, node) 之上
+// 扩展为 render(editor, elem, index, isMusical, depth),由 CardEditor.renderCard 统一调用
+const scriptCardRenderer = {
+  render(editor, elem, index, isMusical, depth) {
+    return editor._renderCardHtml(elem, index, isMusical, depth);
+  },
+};
+for (const t of ['action', 'dialogue', 'song', 'lyric', 'ensemble', 'dual']) {
+  NW.plugins.graph.registerRenderer(t, scriptCardRenderer);
+}
+
+// 迁移期兼容别名:未迁移组件(app.js/search-panel.js/floating-song-editor.js/score-helper.js 等)仍用全局名引用本组件
+const CardEditor = NW.plugins.script.cardEditor;
+window.CardEditor = CardEditor;
 
 // ====== 快捷键（可自定义，见 Shortcuts；默认绑定保持不变） ======
 document.addEventListener('keydown', (e) => {

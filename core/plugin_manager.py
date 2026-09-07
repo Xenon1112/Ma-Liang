@@ -245,14 +245,20 @@ def get_plugin_dir(pid):
 
 
 def registry():
-    """各插件 manifest 与状态清单(供前端插件管理界面使用)"""
+    """各插件 manifest 与状态清单(供前端插件管理界面使用)
+
+    按拓扑加载序排列:前端引导脚本依此顺序插入各插件的 web 资源,
+    保证依赖方(如 script 依赖 graph)的脚本在被依赖方之后加载。
+    """
+    ordered = [pid for pid in _load_order if pid in _plugins]
+    ordered += [pid for pid in _plugins if pid not in _load_order]  # 未加载/失败的排最后
     return [
         {
             "id": pid,
-            "manifest": info["manifest"],
-            "source": info["source"],
-            "status": info["status"],
-            "error": info["error"],
+            "manifest": _plugins[pid]["manifest"],
+            "source": _plugins[pid]["source"],
+            "status": _plugins[pid]["status"],
+            "error": _plugins[pid]["error"],
         }
-        for pid, info in _plugins.items()
+        for pid in ordered
     ]

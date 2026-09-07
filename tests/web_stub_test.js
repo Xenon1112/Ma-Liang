@@ -16,7 +16,8 @@ const ROOT = path.resolve(__dirname, '..');
 const sandbox = {
   console,
   // extensions.js / km-counter.js 在加载期不触碰 document,仅给最小桩
-  document: { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [] },
+  // (card-editor.js 加载期挂 document 级 keydown 监听,需要 addEventListener 桩)
+  document: { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {} },
   // AppState 桩:与 static/js/state.js 的事件总线同形状(NW.events 直接指向它)
   AppState: {
     rightPanelTab: null,
@@ -44,6 +45,9 @@ for (const rel of [
   'static/js/core/extensions.js',
   'tests/fixtures/km_counter/web/km-counter.js',
   'plugins/graph/web/graph.js',
+  // script 插件 web 文件依赖 graph 渲染器注册表,须排在 graph.js 之后(与注册表依赖序一致)
+  'plugins/script/web/script-sidebar.js',
+  'plugins/script/web/card-editor.js',
 ]) {
   const file = path.join(ROOT, rel);
   vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: rel });
@@ -95,6 +99,22 @@ try {
   noRenderThrew = true;
 }
 check('缺 render 的渲染器注册抛错', noRenderThrew);
+
+// --- script 插件前端:挂载点 + window 兼容别名 + 六类型渲染器注册 ---
+const script = NW.plugins.script;
+check('script 前端挂载 sidebar/cardEditor 子键',
+  !!script && !!script.sidebar && !!script.cardEditor);
+check('window 兼容别名 ScriptSidebar 指向 NW.plugins.script.sidebar',
+  sandbox.window.ScriptSidebar === script.sidebar);
+check('window 兼容别名 CardEditor 指向 NW.plugins.script.cardEditor',
+  sandbox.window.CardEditor === script.cardEditor);
+check('cardEditor 保留 renderCard/_renderCardHtml(分发 + 原实现)',
+  typeof script.cardEditor.renderCard === 'function'
+  && typeof script.cardEditor._renderCardHtml === 'function');
+for (const t of ['action', 'dialogue', 'song', 'lyric', 'ensemble', 'dual']) {
+  const r = graph.getRenderer(t);
+  check(`script 已注册 ${t} 渲染器`, !!r && typeof r.render === 'function');
+}
 
 if (failures) {
   console.log(`\n${failures} 项失败`);
