@@ -6,7 +6,10 @@
 - 总验收插件 tests/fixtures/km_counter/(第三方形态,不用 legacy_routes):
   拷入临时插件目录经 plugin_manager 加载,验证实体注册表/list_entities、
   json_transfer 导出导入回环(fk 重映射)、路由前缀强制、manifest web 字段返回
-- 前端扩展点(sidebar.tabs/toolbar.actions/事件订阅):子进程跑
+- graph 地基插件(内置形态拷入):加载/迁移、/api/plugins/graph/ 前缀路由、
+  类型注册表(重复注册抛错)、create_node 拒绝未注册类型、
+  创建→list_children→reorder→级联软删全链路
+- 前端扩展点(sidebar.tabs/toolbar.actions/事件订阅/graph 渲染器注册表):子进程跑
   tests/web_stub_test.js(node),node 不可用时跳过并提示
 """
 import importlib.util
@@ -99,6 +102,9 @@ def main():
     # 拷入临时插件目录走与内置插件相同的 discover/load_all 路径
     shutil.copytree(Path(__file__).resolve().parent / "fixtures" / "km_counter",
                     plugins_dir / "km_counter")
+    # graph 地基插件(内置形态,同样无 legacy_routes):拷入临时目录验证加载/迁移/服务
+    shutil.copytree(Path(__file__).resolve().parent.parent / "plugins" / "graph",
+                    plugins_dir / "graph")
 
     app = Flask("conformance")
 
@@ -166,6 +172,105 @@ def main():
     check("未设 legacy_routes 时路由前缀强制生效",
           prefix_error is not None and "/api/plugins/km_counter/" in prefix_error,
           str(prefix_error))
+
+    # --- graph 地基插件(内置形态拷入,无 legacy_routes) ---
+    graph_reg = reg.get("graph", {})
+    check("graph 插件加载成功", graph_reg.get("status") == "loaded", str(graph_reg))
+    graph_routes = {r.rule for r in app.routes if r.rule.startswith("/api/plugins/graph/")}
+    check("graph 路由带强制前缀注册",
+          graph_routes == {
+              "/api/plugins/graph/nodes",
+              "/api/plugins/graph/nodes/<int:id>",
+              "/api/plugins/graph/nodes/reorder",
+          }, str(graph_routes))
+
+    conn = get_conn()
+    graph_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='graph_nodes'"
+    ).fetchone()
+    graph_mig = conn.execute(
+        "SELECT version FROM plugin_migrations WHERE plugin_id='graph' AND version=1"
+    ).fetchone()
+    conn.close()
+    check("graph 迁移已建表", graph_table is not None)
+    check("graph 迁移已记录", graph_mig is not None)
+
+    # 以 consumer 身份(插件运行时消费方式)require graph 服务,走类型注册 + 节点全链路
+    graph_svc = consumer.require("graph")
+    check("graph 服务可 require", graph_svc is not None)
+    if graph_svc:
+        graph_svc["register_node_type"]("km_block",
+                                        {"label": "计数块", "plugin_id": "km_counter"})
+        types = graph_svc["list_node_types"]()
+        check("fixture 注册节点类型成功",
+              any(t["type"] == "km_block" and t["label"] == "计数块"
+                  and t["plugin_id"] == "km_counter" for t in types), str(types))
+        check("get_node_type 可取回",
+              (graph_svc["get_node_type"]("km_block") or {}).get("label") == "计数块")
+
+        dup_type_err = None
+        try:
+            graph_svc["register_node_type"]("km_block", {"label": "重复"})
+        except ValueError as e:
+            dup_type_err = str(e)
+        check("重复注册节点类型抛错",
+              dup_type_err is not None and "重复注册" in dup_type_err, str(dup_type_err))
+
+        reject_err = None
+        try:
+            graph_svc["create_node"]({"project_id": 777, "type": "ghost"})
+        except ValueError as e:
+            reject_err = str(e)
+        check("create_node 拒绝未注册类型",
+              reject_err is not None and "未注册" in reject_err, str(reject_err))
+
+        # 全链路:创建(含层级)→ list_children → update → reorder → 级联软删
+        n1 = graph_svc["create_node"]({"project_id": 777, "type": "km_block",
+                                       "payload": {"text": "一"}})
+        n2 = graph_svc["create_node"]({"project_id": 777, "type": "km_block",
+                                       "payload": {"text": "二"}})
+        n1c = graph_svc["create_node"]({"project_id": 777, "type": "km_block",
+                                        "parent_id": n1["id"], "payload": {"text": "一子"}})
+        check("创建节点成功(payload 解析为对象、自动排到同级末尾)",
+              n1["sort_order"] == 1 and n2["sort_order"] == 2
+              and n1["payload"] == {"text": "一"}, str((n1, n2)))
+        check("list_children 根级按 sort_order 返回",
+              [n["id"] for n in graph_svc["list_children"](777)] == [n1["id"], n2["id"]],
+              str(graph_svc["list_children"](777)))
+        check("list_children 子级按 parent_id 返回",
+              [n["id"] for n in graph_svc["list_children"](777, n1["id"])] == [n1c["id"]],
+              str(graph_svc["list_children"](777, n1["id"])))
+
+        updated = graph_svc["update_node"](n1["id"], {"payload": {"text": "一改"}})
+        check("update_node 改 payload 生效",
+              updated["payload"] == {"text": "一改"}, str(updated))
+
+        graph_svc["reorder"](777, None, [n2["id"], n1["id"]])
+        check("reorder 重排同级顺序生效",
+              [n["id"] for n in graph_svc["list_children"](777)] == [n2["id"], n1["id"]],
+              str(graph_svc["list_children"](777)))
+
+        deleted = graph_svc["soft_delete_node"](n1["id"])
+        check("软删节点级联后代", deleted == 2, f"deleted={deleted}")
+        check("软删后 get_node 不可见", graph_svc["get_node"](n1["id"]) is None)
+        check("软删后 list_children 不含已删节点",
+              [n["id"] for n in graph_svc["list_children"](777)] == [n2["id"]]
+              and graph_svc["list_children"](777, n1["id"]) == [],
+              str(graph_svc["list_children"](777)))
+
+    # graph 同样未设 legacy_routes:非前缀路由必须被拒
+    graph_prefix_error = None
+    graph_manifest = graph_reg.get("manifest") or {}
+    if graph_manifest:
+        graph_api = PluginAPI("graph", graph_manifest, app)
+        try:
+            graph_api.route("/api/graph/illegal")(lambda: None)
+        except ValueError as e:
+            graph_prefix_error = str(e)
+    check("graph 未设 legacy_routes 时路由前缀强制生效",
+          graph_prefix_error is not None and "/api/plugins/graph/" in graph_prefix_error,
+          str(graph_prefix_error))
+
 
     # --- 实体注册表 ---
     entities = consumer.list_entities()
@@ -302,9 +407,13 @@ def main():
     km_count = conn.execute(
         "SELECT COUNT(*) AS c FROM plugin_migrations WHERE plugin_id='km_counter'"
     ).fetchone()["c"]
+    graph_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM plugin_migrations WHERE plugin_id='graph'"
+    ).fetchone()["c"]
     conn.close()
     check("迁移幂等(重复加载不重复记录)", count == 1, f"count={count}")
     check("km_counter 迁移幂等", km_count == 1, f"count={km_count}")
+    check("graph 迁移幂等", graph_count == 1, f"count={graph_count}")
 
     # --- 前端扩展点桩测试(node,无头环境无法跑真实 DOM) ---
     node = shutil.which("node")

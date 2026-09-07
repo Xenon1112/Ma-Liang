@@ -43,6 +43,7 @@ for (const rel of [
   'static/js/core/nw.js',
   'static/js/core/extensions.js',
   'tests/fixtures/km_counter/web/km-counter.js',
+  'plugins/graph/web/graph.js',
 ]) {
   const file = path.join(ROOT, rel);
   vm.runInContext(fs.readFileSync(file, 'utf8'), sandbox, { filename: rel });
@@ -72,6 +73,28 @@ NW.events.emit('project.opened', { projectId: 42, projectType: 'novel' });
 check('project.opened 订阅生效',
   NW.plugins.km_counter && NW.plugins.km_counter.openedProjectId === 42,
   `openedProjectId=${NW.plugins.km_counter && NW.plugins.km_counter.openedProjectId}`);
+
+// --- graph 渲染器注册表(地基机制,无 UI 面板) ---
+const graph = NW.plugins.graph;
+check('graph 前端挂载到 NW.plugins.graph', !!graph);
+graph.registerRenderer('km-block', { render(container, node) {} });
+check('渲染器注册后可按类型取回',
+  typeof graph.getRenderer('km-block').render === 'function');
+check('未注册类型取回 null', graph.getRenderer('ghost') === null);
+let dupThrew = false;
+try {
+  graph.registerRenderer('km-block', { render() {} });
+} catch (e) {
+  dupThrew = true;
+}
+check('渲染器重复注册抛错', dupThrew);
+let noRenderThrew = false;
+try {
+  graph.registerRenderer('bad', {});
+} catch (e) {
+  noRenderThrew = true;
+}
+check('缺 render 的渲染器注册抛错', noRenderThrew);
 
 if (failures) {
   console.log(`\n${failures} 项失败`);

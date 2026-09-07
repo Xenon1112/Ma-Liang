@@ -1,6 +1,6 @@
 -- 项目管理插件:建表(结构原样抄自 core/database.py MIGRATION_V1 对应部分)
 -- project_type 列来自全局 MIGRATION_V2 的 ALTER,这里直接并入建表
--- (存量库按 legacy 标记跳过,新库先建表,随后内核 init_db 的 V2 ALTER 因 duplicate column 被忽略,双保险)
+-- (存量库也会执行本文件,IF NOT EXISTS 保证 no-op;新库先建表,随后内核 init_db 的 V2 ALTER 因 duplicate column 被忽略,双保险)
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,

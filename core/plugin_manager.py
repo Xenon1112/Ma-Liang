@@ -186,14 +186,10 @@ def _apply_migrations(pid, info, legacy):
             if ver in applied:
                 continue
             if legacy and info["source"] == "builtin":
-                # 老库:内置插件的表已由全局 V1..V6 建好,直接标记已应用;
-                # 迁移 SQL 一律 CREATE TABLE IF NOT EXISTS 保证幂等,双保险
-                conn.execute(
-                    "INSERT INTO plugin_migrations (plugin_id, version, applied_at) VALUES (?, ?, datetime('now','localtime'))",
-                    (pid, ver))
-                conn.commit()
-                log.info("插件 %s 迁移 %03d 按存量库直接标记已应用", pid, ver)
-                continue
+                # 老库:内置插件的表大多已由全局 V1..V6 建好,但后加的内置插件(如 graph)
+                # 在存量库上还没有表;迁移 SQL 一律 CREATE TABLE IF NOT EXISTS 幂等,
+                # 照常执行(已有表是 no-op),不能只标记跳过
+                log.info("插件 %s 迁移 %03d 在存量库上按幂等 SQL 照常执行", pid, ver)
             sql = f.read_text(encoding="utf-8")
             try:
                 conn.execute("BEGIN")
