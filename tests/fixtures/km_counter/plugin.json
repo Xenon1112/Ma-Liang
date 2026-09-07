@@ -1,0 +1,8 @@
+{
+  "id": "km_counter",
+  "name": "计数笔记(总验收测试插件)",
+  "version": "1.0.0",
+  "api_version": 1,
+  "entry": "backend.py",
+  "web": ["web/km-counter.js"]
+}

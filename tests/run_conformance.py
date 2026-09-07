@@ -1,13 +1,20 @@
 """插件协议符合性测试(纯标准库,直接 python tests/run_conformance.py 运行)
 
-在临时目录构造 fixture 插件,验证:
-- 合法插件:路由注册、迁移建表、plugin_migrations 记录、provide/require、事件总线
-- 坏插件(manifest 缺字段):标记 failed,不影响好插件(故障隔离)
+- 在临时目录构造 fixture 插件,验证:
+  合法插件:路由注册、迁移建表、plugin_migrations 记录、provide/require、事件总线;
+  坏插件(manifest 缺字段):标记 failed,不影响好插件(故障隔离)
+- 总验收插件 tests/fixtures/km_counter/(第三方形态,不用 legacy_routes):
+  拷入临时插件目录经 plugin_manager 加载,验证实体注册表/list_entities、
+  json_transfer 导出导入回环(fk 重映射)、路由前缀强制、manifest web 字段返回
+- 前端扩展点(sidebar.tabs/toolbar.actions/事件订阅):子进程跑
+  tests/web_stub_test.js(node),node 不可用时跳过并提示
 """
 import importlib.util
 import json
 import os
+import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -88,6 +95,10 @@ def main():
         # 缺 name / version / api_version / entry
         "id": "fixture_bad",
     }, backend="class Plugin:\n    def activate(self, api):\n        pass\n")
+    # 总验收插件:静态 fixture(第三方形态,manifest 不含 legacy_routes),
+    # 拷入临时插件目录走与内置插件相同的 discover/load_all 路径
+    shutil.copytree(Path(__file__).resolve().parent / "fixtures" / "km_counter",
+                    plugins_dir / "km_counter")
 
     app = Flask("conformance")
 
@@ -121,6 +132,41 @@ def main():
     check("服务可 require", svc is not None and svc["hello"]() == "world")
     check("事件可收到", received == [{"source": "fixture_good"}], str(received))
 
+    # --- 总验收插件 km_counter(tests/fixtures,第三方形态) ---
+    km_reg = reg.get("km_counter", {})
+    check("km_counter 加载成功", km_reg.get("status") == "loaded", str(km_reg))
+    check("km_counter 路由已注册(带强制前缀)",
+          any(r.rule == "/api/plugins/km_counter/notes" for r in app.routes),
+          str([r.rule for r in app.routes]))
+
+    conn = get_conn()
+    km_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='km_counter__notes'"
+    ).fetchone()
+    km_mig = conn.execute(
+        "SELECT version FROM plugin_migrations WHERE plugin_id='km_counter' AND version=1"
+    ).fetchone()
+    conn.close()
+    check("km_counter 迁移已建表", km_table is not None)
+    check("km_counter 迁移已记录", km_mig is not None)
+
+    km_manifest = km_reg.get("manifest") or {}
+    check("km_counter manifest web 字段被 registry 返回",
+          km_manifest.get("web") == ["web/km-counter.js"],
+          str(km_reg.get("manifest")))
+
+    # manifest 未设 legacy_routes:非前缀路由必须被拒(前缀强制生效)
+    prefix_error = None
+    if km_manifest:
+        km_api = PluginAPI("km_counter", km_manifest, app)
+        try:
+            km_api.route("/api/km_counter/illegal")(lambda: None)
+        except ValueError as e:
+            prefix_error = str(e)
+    check("未设 legacy_routes 时路由前缀强制生效",
+          prefix_error is not None and "/api/plugins/km_counter/" in prefix_error,
+          str(prefix_error))
+
     # --- 实体注册表 ---
     entities = consumer.list_entities()
     fixture_entity = next((e for e in entities
@@ -152,6 +198,20 @@ def main():
     check("recycle=False 的附属表实体不进回收站消费",
           "sub" not in entity_tables, str(entity_tables))
 
+    # km_counter 的实体:recycle=True,回收站式消费应能看到
+    km_entity = next((e for e in entities
+                      if e["plugin_id"] == "km_counter" and e["entity"] == "km_note"), None)
+    check("km_counter 注册的实体可 list_entities 查到", km_entity is not None, str(entities))
+    check("km_counter 实体注册信息字段完整", km_entity == {
+        "plugin_id": "km_counter", "entity": "km_note",
+        "table": "km_counter__notes", "label": "计数笔记",
+        "name_column": "name", "export": True, "export_order": 90,
+        "fk": {"project_id": "project"}, "weak_fk": {},
+        "recycle": True, "export_hook": None, "import_hook": None,
+    }, str(km_entity))
+    check("recycle 式消费可见 km_counter 实体(recycle=True)",
+          entity_tables.get("km_note") == ("km_counter__notes", "name"), str(entity_tables))
+
     # --- json_transfer 默认处理器:带 fk 声明的实体随注册表参与导出/导入 ---
     database.init_db()  # 补全 projects 等业务表(导出载荷还引用 acts/floating_songs 等全局 schema 表)
     jt_spec = importlib.util.spec_from_file_location(
@@ -169,6 +229,9 @@ def main():
     conn.execute("INSERT INTO fixture_good__subs (item_id, name) VALUES (?, '子甲1')", (item_jia,))
     conn.execute("INSERT INTO fixture_good__subs (item_id, name) VALUES (?, '子甲2')", (item_jia,))
     conn.execute("INSERT INTO fixture_good__subs (item_id, name) VALUES (999, '子悬空')")  # 悬空:导出级联剔除
+    # km_counter 实体行:随注册表参与导出/导入回环
+    conn.execute("INSERT INTO km_counter__notes (project_id, name, content) VALUES (?, '笔记一', '内容一')", (pid,))
+    conn.execute("INSERT INTO km_counter__notes (project_id, name, content) VALUES (?, '笔记二', '内容二')", (pid,))
     conn.commit()
     payload = jt._build_export_payload(conn, pid)
     conn.close()
@@ -182,6 +245,10 @@ def main():
     check("附属表按 fk 挂靠导出(悬空行被级联剔除)",
           isinstance(subs, list) and sorted(r["name"] for r in subs) == ["子甲1", "子甲2"],
           str(subs))
+    km_notes = payload.get("km_counter__notes")
+    check("默认导出处理器包含 km_counter 实体表",
+          isinstance(km_notes, list) and sorted(r["name"] for r in km_notes) == ["笔记一", "笔记二"],
+          str(list(payload.keys())))
 
     new_proj = jt.import_project_json(payload)
     check("导入创建副本项目", new_proj["id"] != pid and new_proj["title"] == "回环源（副本）",
@@ -192,6 +259,8 @@ def main():
     new_subs = [dict(r) for r in conn.execute(
         "SELECT s.* FROM fixture_good__subs s JOIN fixture_good__items i ON s.item_id = i.id "
         "WHERE i.project_id = ?", (new_proj["id"],)).fetchall()]
+    new_km_notes = [dict(r) for r in conn.execute(
+        "SELECT * FROM km_counter__notes WHERE project_id = ?", (new_proj["id"],)).fetchall()]
     conn.close()
     old_item_ids = {r["id"] for r in items} if items else set()
     check("导入后 fixture 行 id 全部重映射",
@@ -205,6 +274,14 @@ def main():
     check("附属表导入后 fk 指向重映射后的新 id",
           len(new_subs) == 2 and all(r["item_id"] == new_jia_id for r in new_subs),
           str(new_subs))
+    old_km_ids = {r["id"] for r in km_notes} if km_notes else set()
+    check("km_counter 导入后行 id 全部重映射",
+          len(new_km_notes) == 2 and old_km_ids.isdisjoint(r["id"] for r in new_km_notes),
+          str(new_km_notes))
+    check("km_counter 导入后 fk 指向重映射后的新项目 id",
+          all(r["project_id"] == new_proj["id"] for r in new_km_notes), str(new_km_notes))
+    check("km_counter 导入保留业务字段",
+          sorted(r["name"] for r in new_km_notes) == ["笔记一", "笔记二"], str(new_km_notes))
 
     # --- 坏插件 ---
     check("坏插件标记 failed", reg.get("fixture_bad", {}).get("status") == "failed",
@@ -222,8 +299,24 @@ def main():
     count = conn.execute(
         "SELECT COUNT(*) AS c FROM plugin_migrations WHERE plugin_id='fixture_good'"
     ).fetchone()["c"]
+    km_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM plugin_migrations WHERE plugin_id='km_counter'"
+    ).fetchone()["c"]
     conn.close()
     check("迁移幂等(重复加载不重复记录)", count == 1, f"count={count}")
+    check("km_counter 迁移幂等", km_count == 1, f"count={km_count}")
+
+    # --- 前端扩展点桩测试(node,无头环境无法跑真实 DOM) ---
+    node = shutil.which("node")
+    stub = Path(__file__).resolve().parent / "web_stub_test.js"
+    if node is None:
+        print("[SKIP] 前端桩测试(未找到 node,跳过;装 node 后可直接 node tests/web_stub_test.js)")
+    else:
+        r = subprocess.run([node, str(stub)], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        print(r.stdout, end="")
+        check("前端桩测试(sidebar.tabs/toolbar.actions/事件订阅)",
+              r.returncode == 0, (r.stderr or "").strip())
 
     database.set_db_path(None)
     if _failures:

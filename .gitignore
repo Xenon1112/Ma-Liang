@@ -11,3 +11,4 @@ third_party/
 .env
 .DS_Store
 Thumbs.db
+tests/.verify/
