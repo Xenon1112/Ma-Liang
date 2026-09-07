@@ -121,9 +121,11 @@ class Plugin:
         _api = api
 
         api.register_entity(entity="volume", table="volumes", label="卷",
-                            export=True, export_order=20)
+                            export=True, export_order=20,
+                            fk={"project_id": "project"})
         api.register_entity(entity="chapter", table="chapters", label="章",
-                            export=True, export_order=30)
+                            export=True, export_order=30,
+                            fk={"project_id": "project", "volume_id": "volume"})
 
         # 对外提供卷/章查询,draft 插件的保存前目标校验依赖它(运行时再取,避免加载顺序耦合)
         api.provide("chapter", {

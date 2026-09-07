@@ -241,6 +241,12 @@ class Plugin:
         global _api
         _api = api
 
+        # drafts 是附属表(无 deleted_at/名称列,不进回收站),注册仅为 JSON 导出/导入的
+        # 声明式搬运:chapter_id/volume_id 均可空但皆强引用,悬空(非 NULL 而映射不到)整行跳过
+        api.register_entity(entity="draft", table="drafts", label="草稿",
+                            recycle=False, export=True, export_order=35,
+                            fk={"chapter_id": "chapter", "volume_id": "volume"})
+
         # 对外提供草稿读写,chapter 插件的卷首语路由依赖它(运行时再取,避免加载顺序耦合)
         api.provide("draft", {
             "save_draft": save_draft,

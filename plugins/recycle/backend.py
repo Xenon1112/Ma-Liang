@@ -20,9 +20,12 @@ LEGACY_ENTITY_TABLES = {
 }
 
 def _entity_tables():
-    """合并实体注册表与 legacy 过渡映射,返回 {entity: (table, name_column)}"""
+    """合并实体注册表与 legacy 过渡映射,返回 {entity: (table, name_column)};
+    recycle=False 的注册实体是仅供导出搬运的附属表(如 drafts,无 deleted_at 列),不进回收站"""
     tables = dict(LEGACY_ENTITY_TABLES)
     for info in _api.list_entities():
+        if not info.get("recycle", True):
+            continue
         tables[info["entity"]] = (info["table"], info["name_column"])
     return tables
 

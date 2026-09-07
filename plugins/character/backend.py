@@ -117,7 +117,16 @@ class Plugin:
         _api = api
 
         api.register_entity(entity="character", table="characters", label="人物",
-                            name_column="name", export=True, export_order=50)
+                            name_column="name", export=True, export_order=50,
+                            fk={"project_id": "project"})
+        # character_fields/character_appearances 是附属表(无 deleted_at,不进回收站),
+        # 注册仅为 JSON 导出/导入的声明式搬运
+        api.register_entity(entity="character_field", table="character_fields", label="人物字段",
+                            recycle=False, export=True, export_order=55,
+                            fk={"character_id": "character"})
+        api.register_entity(entity="character_appearance", table="character_appearances", label="人物出场",
+                            recycle=False, export=True, export_order=56,
+                            fk={"character_id": "character", "chapter_id": "chapter"})
 
         # ====== Character API ======
 

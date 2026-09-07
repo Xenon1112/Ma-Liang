@@ -116,16 +116,21 @@ class PluginAPI:
     # ====== 实体注册表 ======
 
     def register_entity(self, entity, table, label, name_column="title",
-                        export=False, export_order=100):
+                        export=False, export_order=100, fk=None, weak_fk=None,
+                        recycle=True, export_hook=None, import_hook=None):
         """声明「本插件有这样一个数据实体」,供回收站/导出器等消费者查询。
-        同一插件重复注册同一 entity 抛错"""
+        同一插件重复注册同一 entity 抛错。fk/weak_fk/export_hook/import_hook
+        供 json_transfer 的默认导出/导入处理器消费,语义见 core/registry.py"""
         registry.register_entity(
             self.plugin_id, entity, table, label,
             name_column=name_column, export=export, export_order=export_order,
+            fk=fk, weak_fk=weak_fk, recycle=recycle,
+            export_hook=export_hook, import_hook=import_hook,
         )
 
     def list_entities(self):
-        """全部已注册实体的信息列表(plugin_id/entity/table/label/name_column/export/export_order)"""
+        """全部已注册实体的信息列表(plugin_id/entity/table/label/name_column/
+        export/export_order/fk/weak_fk/recycle/export_hook/import_hook)"""
         return registry.list_entities()
 
     # ====== 服务注册表 ======

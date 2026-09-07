@@ -55,7 +55,8 @@ class Plugin:
         _api = api
 
         api.register_entity(entity="world_setting", table="world_settings", label="设定",
-                            export=True, export_order=60)
+                            export=True, export_order=60,
+                            fk={"project_id": "project"})
 
         @api.route("/api/world-settings", methods=["GET"])
         def api_list_settings():

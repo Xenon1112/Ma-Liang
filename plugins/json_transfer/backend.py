@@ -2,6 +2,32 @@
 
 无专属表(SQL 层按表搬运 volumes/chapters/drafts 等业务表数据),故无 migrations 目录。
 
+声明式搬运:导出/导入的主循环消费内核实体注册表(api.list_entities() 中 export=True
+的实体,按 export_order 排序,被引用方必须排在前面),默认处理器按注册信息完成:
+- 导出:表有 project_id 列则按项目过滤(有 deleted_at 列则按需排除回收站数据);
+  无 project_id 的附属表(如 drafts/character_fields)按 fk/weak_fk 声明挂靠已导出的
+  父实体行集。强外键 fk 指向已排除行时级联剔除该行,弱外键 weak_fk 悬空时置 NULL。
+- 导入:自增主键重映射(旧id→新id 映射表),fk 列按目标实体的映射重写(非 NULL 但
+  映射不到则整行跳过),weak_fk 列悬空置 NULL;weak_fk 指向自身实体时是自引用
+  (如 outlines.parent_id),先置 NULL 插入再统一回写。
+默认处理器表达不了的表,注册时可传 export_hook/import_hook,传了的实体跳过默认处理器:
+- export_hook(conn, project_id, id_sets, include_deleted) -> {payload键: 行数组};
+  若有下游实体引用本实体,钩子须把新 id 集合写入 id_sets[entity]。
+- import_hook(conn, payload, id_maps, new_project_id) -> {旧id: 新id}(返回值存入
+  id_maps[entity],供下游实体重映射)。
+
+payload 键即表名;"project" 根键(单对象、导入时标题加副本后缀)是导出格式固有的根,
+单独处理,不走默认处理器。
+
+仍走定制代码路径的表(都属于尚未插件化的 services,待阶段 3 迁移为插件后改用
+register_entity + hook 声明并清理此处):
+- acts/scenes/script_elements/scene_characters/element_characters/script_config
+  (services/script_service)
+- floating_songs/floating_lyrics(services/floating_song_service,嵌套 lyrics
+  结构与 character_ids JSON 拼接字段,默认处理器表达不了)
+- 乐谱文件 base64 内嵌(services/score_service,script_elements/floating_songs
+  的 score_file 列)
+
 两个跨插件边界:
 - 导出文件路径解析复用 export 插件 provide 的 resolve_output_path,
   请求处理时通过 api.require("export") 取用,export 缺失返回 503;
@@ -15,15 +41,6 @@ _api = None  # activate 时注入的 PluginAPI
 EXPORT_APP = "novel-writer"
 EXPORT_KIND = "project-export"
 EXPORT_VERSION = 1
-
-# 参与导出/导入的项目级数据表（不含 tags/entity_tags/app_config 等全局表）
-_TABLE_KEYS = [
-    "volumes", "chapters", "drafts", "outlines",
-    "characters", "character_fields", "character_appearances",
-    "world_settings", "inspirations",
-    "acts", "scenes", "script_elements",
-    "scene_characters", "element_characters", "script_config",
-]
 
 
 class ExportPluginUnavailable(Exception):
@@ -42,6 +59,55 @@ def _fetch_all(conn, sql, params):
     return [_api.row_to_dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
+def _export_entities():
+    """export=True 的注册实体,按 export_order 排序(外键被引用方必须排在前面)"""
+    return sorted((e for e in _api.list_entities() if e.get("export")),
+                  key=lambda e: e["export_order"])
+
+
+def _export_entity_rows(conn, info, project_id, id_sets, include_deleted):
+    """默认导出处理器:按注册的 fk/weak_fk 声明取一个实体的项目内行集,
+    并把本实体的 id 集合写入 id_sets[entity] 供下游实体挂靠/过滤。
+
+    id_sets: {entity: 已导出 id 集合}(均为级联剔除后的最终行集)。"""
+    table = info["table"]
+    entity = info["entity"]
+    cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
+    # 有 deleted_at 列的表按需追加回收站过滤条件
+    nd = "" if include_deleted or "deleted_at" not in cols else " AND deleted_at IS NULL"
+    if "project_id" in cols:
+        rows = _fetch_all(conn, f"SELECT * FROM {table} WHERE project_id = ?{nd}", (project_id,))
+    else:
+        # 附属表:按声明的外键挂靠已导出的父实体行集(任一外键挂上即入选,如 drafts
+        # 挂 chapter 或 volume);自引用外键不作挂靠条件
+        conds, params = [], []
+        for col, target in {**info["fk"], **info["weak_fk"]}.items():
+            if target == entity:
+                continue
+            ids = list(id_sets.get(target) or ())
+            if ids:
+                conds.append(f"{col} IN ({', '.join('?' * len(ids))})")
+                params.extend(ids)
+            else:
+                conds.append("0")  # 父实体行集为空,该列挂不上任何行
+        if not conds:
+            raise ValueError(f"实体 {entity} 的表 {table} 无 project_id 列且未声明外键,无法按项目导出")
+        rows = _fetch_all(conn, f"SELECT * FROM {table} WHERE {' OR '.join(conds)}{nd}", params)
+    # 强外键:指向已排除行的行级联剔除(对应 ON DELETE CASCADE 语义)
+    for col, target in info["fk"].items():
+        valid = id_sets.get(target) or set()
+        rows = [r for r in rows if r.get(col) is None or r[col] in valid]
+    my_ids = {r["id"] for r in rows} if "id" in cols else set()
+    # 弱外键:悬空引用置 NULL(对应 ON DELETE SET NULL 语义)
+    for col, target in info["weak_fk"].items():
+        valid = my_ids if target == entity else (id_sets.get(target) or set())
+        for r in rows:
+            if r.get(col) is not None and r[col] not in valid:
+                r[col] = None
+    id_sets[entity] = my_ids
+    return rows
+
+
 def _build_export_payload(conn, project_id, include_deleted=False):
     """把一个项目的数据收集为导出字典。
     include_deleted=False（默认）时不含回收站（软删除）数据，并级联剔除引用
@@ -56,63 +122,25 @@ def _build_export_payload(conn, project_id, include_deleted=False):
         "version": EXPORT_VERSION,
         "project": _api.row_to_dict(proj),
     }
+    # 声明式主循环:注册实体按 export_order 导出;project 根已作为单对象写入 payload["project"]
+    id_sets = {"project": {project_id}}
+    for info in _export_entities():
+        if info["entity"] == "project":
+            continue
+        hook = info.get("export_hook")
+        if hook:
+            extra = hook(conn, project_id, id_sets, include_deleted)
+            if extra:
+                payload.update(extra)
+            continue
+        payload[info["table"]] = _export_entity_rows(
+            conn, info, project_id, id_sets, include_deleted)
+
+    # ====== 以下为尚未插件化的 services 表的定制代码路径(待阶段 3 清理,见模块 docstring)======
     pid = (project_id,)
-    # 有 deleted_at 列的表按需追加回收站过滤条件
     nd = "" if include_deleted else " AND deleted_at IS NULL"
-
-    volumes = _fetch_all(conn, f"SELECT * FROM volumes WHERE project_id = ?{nd}", pid)
-    vol_ids = {r["id"] for r in volumes}
-    payload["volumes"] = volumes
-
-    chapters = _fetch_all(conn, f"SELECT * FROM chapters WHERE project_id = ?{nd}", pid)
-    # 级联：所属卷被排除的章节一并剔除
-    chapters = [r for r in chapters if r["volume_id"] in vol_ids]
-    ch_ids = {r["id"] for r in chapters}
-    payload["chapters"] = chapters
-
-    # 草稿挂在章节上（章节草稿）或卷上（卷首语草稿，chapter_id 为 NULL）
-    drafts = _fetch_all(conn, """
-        SELECT * FROM drafts WHERE
-            chapter_id IN (SELECT id FROM chapters WHERE project_id = ?)
-            OR volume_id IN (SELECT id FROM volumes WHERE project_id = ?)
-    """, (project_id, project_id))
-    payload["drafts"] = [d for d in drafts if d["chapter_id"] in ch_ids
-                         or (d["chapter_id"] is None and d["volume_id"] in vol_ids)]
-
-    outlines = _fetch_all(conn, f"SELECT * FROM outlines WHERE project_id = ?{nd}", pid)
-    outline_ids = {r["id"] for r in outlines}
-    for r in outlines:
-        # 弱引用指向已排除行时置 NULL（对应 ON DELETE SET NULL 语义）
-        if r.get("parent_id") not in outline_ids:
-            r["parent_id"] = None
-        if r.get("linked_chapter_id") not in ch_ids:
-            r["linked_chapter_id"] = None
-    payload["outlines"] = outlines
-
-    characters = _fetch_all(conn, f"SELECT * FROM characters WHERE project_id = ?{nd}", pid)
-    char_ids = {r["id"] for r in characters}
-    payload["characters"] = characters
-
-    fields = _fetch_all(conn, """
-        SELECT * FROM character_fields WHERE character_id IN
-            (SELECT id FROM characters WHERE project_id = ?)
-    """, pid)
-    payload["character_fields"] = [r for r in fields if r["character_id"] in char_ids]
-
-    appearances = _fetch_all(conn, """
-        SELECT * FROM character_appearances WHERE character_id IN
-            (SELECT id FROM characters WHERE project_id = ?)
-    """, pid)
-    payload["character_appearances"] = [r for r in appearances
-                                        if r["character_id"] in char_ids and r["chapter_id"] in ch_ids]
-
-    payload["world_settings"] = _fetch_all(conn, f"SELECT * FROM world_settings WHERE project_id = ?{nd}", pid)
-
-    inspirations = _fetch_all(conn, f"SELECT * FROM inspirations WHERE project_id = ?{nd}", pid)
-    for r in inspirations:
-        if r.get("linked_chapter_id") not in ch_ids:
-            r["linked_chapter_id"] = None
-    payload["inspirations"] = inspirations
+    ch_ids = id_sets.get("chapter", set())
+    char_ids = id_sets.get("character", set())
 
     # 剧本项目结构：幕 → 场 → 卡片元素
     acts = _fetch_all(conn, f"SELECT * FROM acts WHERE project_id = ?{nd}", pid)
@@ -262,6 +290,22 @@ def _insert_rows(conn, table, rows, remap, required=(), self_field=None):
     return id_map
 
 
+def _import_entity_rows(conn, info, payload, id_maps):
+    """默认导入处理器:按注册的 fk/weak_fk 声明重映射插入,返回 {旧id: 新id}。
+    id_maps: {entity: {旧id: 新id}}(被引用实体须已按 export_order 先导入)。"""
+    remap, required, self_field = {}, [], None
+    for col, target in info["fk"].items():
+        remap[col] = id_maps.get(target, {})
+        required.append(col)
+    for col, target in info["weak_fk"].items():
+        if target == info["entity"]:
+            self_field = col
+        else:
+            remap[col] = id_maps.get(target, {})
+    return _insert_rows(conn, info["table"], _rows(payload, info["table"]),
+                        remap, required=tuple(required), self_field=self_field)
+
+
 def import_project_json(payload):
     """把导出 JSON 创建为全新项目副本（所有 id 重新分配，标题加「（副本）」），返回新项目字典"""
     if not isinstance(payload, dict):
@@ -276,7 +320,7 @@ def import_project_json(payload):
 
     conn = _api.db()
     try:
-        # projects：标题加副本后缀
+        # projects 根:标题加副本后缀(导出格式固有的根,单独处理)
         prow = dict(proj)
         prow.pop("id", None)
         prow["title"] = f"{prow['title']}（副本）"
@@ -287,30 +331,22 @@ def import_project_json(payload):
         new_project_id = cur.lastrowid
         pmap = {proj["id"]: new_project_id} if proj.get("id") is not None else {}
 
-        # 按依赖顺序逐表重映射 id 插入；required 列出不可空外键，悬空则整行跳过
-        vmap = _insert_rows(conn, "volumes", _rows(payload, "volumes"),
-                            {"project_id": pmap}, required=("project_id",))
-        cmap = _insert_rows(conn, "chapters", _rows(payload, "chapters"),
-                            {"volume_id": vmap, "project_id": pmap},
-                            required=("volume_id", "project_id"))
-        _insert_rows(conn, "drafts", _rows(payload, "drafts"),
-                     {"chapter_id": cmap, "volume_id": vmap},
-                     required=("chapter_id", "volume_id"))
-        _insert_rows(conn, "outlines", _rows(payload, "outlines"),
-                     {"project_id": pmap, "linked_chapter_id": cmap},
-                     required=("project_id",), self_field="parent_id")
-        hmap = _insert_rows(conn, "characters", _rows(payload, "characters"),
-                            {"project_id": pmap}, required=("project_id",))
-        _insert_rows(conn, "character_fields", _rows(payload, "character_fields"),
-                     {"character_id": hmap}, required=("character_id",))
-        _insert_rows(conn, "character_appearances", _rows(payload, "character_appearances"),
-                     {"character_id": hmap, "chapter_id": cmap},
-                     required=("character_id", "chapter_id"))
-        _insert_rows(conn, "world_settings", _rows(payload, "world_settings"),
-                     {"project_id": pmap}, required=("project_id",))
-        _insert_rows(conn, "inspirations", _rows(payload, "inspirations"),
-                     {"project_id": pmap, "linked_chapter_id": cmap},
-                     required=("project_id",))
+        # 声明式主循环:注册实体按 export_order 重映射插入(依赖顺序与导出一致)
+        id_maps = {"project": pmap}
+        for info in _export_entities():
+            if info["entity"] == "project":
+                continue
+            hook = info.get("import_hook")
+            if hook:
+                id_maps[info["entity"]] = hook(conn, payload, id_maps, new_project_id) or {}
+                continue
+            id_maps[info["entity"]] = _import_entity_rows(conn, info, payload, id_maps)
+
+        # ====== 以下为尚未插件化的 services 表的定制代码路径(待阶段 3 清理,见模块 docstring)======
+        vmap = id_maps.get("volume", {})
+        cmap = id_maps.get("chapter", {})
+        hmap = id_maps.get("character", {})
+
         amap = _insert_rows(conn, "acts", _rows(payload, "acts"),
                             {"project_id": pmap}, required=("project_id",))
         smap = _insert_rows(conn, "scenes", _rows(payload, "scenes"),

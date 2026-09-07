@@ -57,7 +57,9 @@ class Plugin:
         _api = api
 
         api.register_entity(entity="inspiration", table="inspirations", label="灵感",
-                            export=True, export_order=70)
+                            export=True, export_order=70,
+                            fk={"project_id": "project"},
+                            weak_fk={"linked_chapter_id": "chapter"})
 
         @api.route("/api/inspirations", methods=["GET"])
         def api_list_inspirations():

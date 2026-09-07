@@ -88,7 +88,9 @@ class Plugin:
         _api = api
 
         api.register_entity(entity="outline", table="outlines", label="大纲",
-                            export=True, export_order=40)
+                            export=True, export_order=40,
+                            fk={"project_id": "project"},
+                            weak_fk={"parent_id": "outline", "linked_chapter_id": "chapter"})
 
         @api.route("/api/outlines", methods=["GET"])
         def api_outline_tree():
