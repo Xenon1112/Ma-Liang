@@ -59,15 +59,15 @@ const App = {
       toast('加载作品列表失败: ' + (e.message || e), 'error');
     }
 
+    // 渲染扩展点:右侧栏 tab 与工具栏按钮(由插件注册,消费逻辑见 core/extensions.js)
+    renderSidebarTabs();
+    renderToolbarActions();
+
     // 绑定工具栏按钮
     document.getElementById('btn-new-project').addEventListener('click', showNewProjectModal);
 
     document.getElementById('btn-back').addEventListener('click', () => {
       App.closeProject();
-    });
-
-    document.getElementById('btn-search').addEventListener('click', () => {
-      SearchPanel.show();
     });
 
     document.getElementById('btn-focus').addEventListener('click', () => {
@@ -78,16 +78,8 @@ const App = {
       App.cycleTheme();
     });
 
-    document.getElementById('btn-export').addEventListener('click', () => {
-      ExportDialog.show();
-    });
-
     document.getElementById('btn-backup').addEventListener('click', async () => {
       await BackupDialog.show();
-    });
-
-    document.getElementById('btn-recycle').addEventListener('click', () => {
-      RecycleBin.show();
     });
 
     document.getElementById('btn-shortcuts').addEventListener('click', () => {
@@ -149,7 +141,6 @@ const App = {
       toggleRightPanel();
       AppState.rightPanelTab = 'outline';
       switchRightTab('outline');
-      OutlinePanel.refresh();
     });
 
     // 右侧面板收起/展开（状态存 localStorage，下次启动恢复）
@@ -159,15 +150,6 @@ const App = {
       switchRightTab(AppState.rightPanelTab || 'outline');
     });
     if (localStorage.getItem('rightPanelCollapsed') === '1') setRightPanelCollapsed(true);
-
-    // 右侧面板标签切换
-    document.querySelectorAll('.panel-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        const tabName = tab.dataset.tab;
-        AppState.rightPanelTab = tabName;
-        switchRightTab(tabName);
-      });
-    });
 
     // 页面关闭/刷新前兜底保存（自动保存是防抖的，直接关窗可能丢最后几秒内容）
     window.addEventListener('pagehide', () => {
@@ -180,7 +162,9 @@ const App = {
       const act = Shortcuts.actionFor(e);
       if (act === 'global.search') {
         e.preventDefault();
-        SearchPanel.show();
+        // 通过扩展点触发搜索动作(由 search 插件注册)
+        const searchAction = NW.getComponents('toolbar.actions').find(a => a.id === 'search');
+        if (searchAction) searchAction.onClick();
         return;
       }
       if (act === 'global.focus') {
@@ -198,11 +182,11 @@ const App = {
         App.navigateChapter(1);
         return;
       }
-      // Esc 关闭搜索 / 退出专注模式（固定键）
+      // Esc 关闭扩展点浮层(如搜索) / 退出专注模式（固定键）
       if (e.key === 'Escape') {
-        if (SearchPanel.visible) {
-          SearchPanel.hide();
-        } else if (AppState.isFocusMode) {
+        const closed = NW.getComponents('toolbar.actions')
+          .some(a => typeof a.closeIfOpen === 'function' && a.closeIfOpen());
+        if (!closed && AppState.isFocusMode) {
           App.toggleFocus();
         }
       }
@@ -330,23 +314,6 @@ function setRightPanelCollapsed(collapsed) {
 function toggleRightPanel() {
   const collapsed = !document.getElementById('right-panel').classList.contains('collapsed');
   setRightPanelCollapsed(collapsed);
-}
-
-function switchRightTab(tabName) {
-  // 展开面板
-  setRightPanelCollapsed(false);
-
-  // 更新标签高亮
-  document.querySelectorAll('.panel-tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.tab === tabName);
-  });
-
-  // 刷新对应内容
-  AppState.rightPanelTab = tabName;
-  if (tabName === 'outline') OutlinePanel.refresh();
-  else if (tabName === 'character') CharacterPanel.refresh();
-  else if (tabName === 'world') WorldSettingPanel.refresh();
-  else if (tabName === 'inspiration') InspirationPanel.refresh();
 }
 
 // ====== 备份对话框 ======

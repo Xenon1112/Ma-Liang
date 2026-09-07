@@ -109,6 +109,14 @@ NW.plugins.world_setting = {
   },
 };
 
+// 注册右侧栏 tab(tab id 沿用历史值 'world',消费逻辑见 static/js/core/extensions.js)
+NW.registerComponent('sidebar.tabs', {
+  id: 'world',
+  title: '设定',
+  order: 30,
+  refresh: () => NW.plugins.world_setting.refresh(),
+});
+
 // 迁移期兼容别名:未迁移组件(app.js/search-panel.js)仍用全局名引用本面板
 const WorldSettingPanel = NW.plugins.world_setting;
 window.WorldSettingPanel = WorldSettingPanel;

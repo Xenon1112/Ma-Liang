@@ -15,16 +15,14 @@
   <div id="toolbar">
     <div class="toolbar-left">
       <button class="toolbar-btn" id="btn-back" title="返回作品列表 (Esc)" style="display:none;">← 返回</button>
-      <button class="toolbar-btn" id="btn-search" title="搜索 (Ctrl+P)">🔍 搜索</button>
+      <!-- 搜索等插件按钮由扩展点 toolbar.actions 动态生成 -->
     </div>
     <div class="toolbar-center" id="toolbar-title">马良</div>
     <div class="toolbar-right">
       <button class="toolbar-btn" id="btn-save" title="保存当前内容">💾 保存</button>
       <button class="toolbar-btn" id="btn-focus" title="专注模式 (F11)">专注</button>
       <button class="toolbar-btn" id="btn-theme" title="切换主题">主题</button>
-      <button class="toolbar-btn" id="btn-export" title="导出">导出</button>
       <button class="toolbar-btn" id="btn-backup" title="备份与恢复">备份</button>
-      <button class="toolbar-btn" id="btn-recycle" title="回收站">回收站</button>
       <button class="toolbar-btn" id="btn-shortcuts" title="自定义快捷键">快捷键</button>
       <button class="toolbar-btn" id="btn-musescore" title="MuseScore 路径设置（乐谱编辑）">MuseScore</button>
       <button class="toolbar-btn" id="btn-quit" title="退出程序">退出</button>
@@ -87,13 +85,9 @@
         </div>
       </div>
 
-      <!-- Right Panel -->
+      <!-- Right Panel(tab 按钮由扩展点 sidebar.tabs 动态生成,见 core/extensions.js) -->
       <div id="right-panel" class="collapsed">
         <div class="panel-tabs">
-          <div class="panel-tab active" data-tab="outline">大纲</div>
-          <div class="panel-tab" data-tab="character">人物</div>
-          <div class="panel-tab" data-tab="world">设定</div>
-          <div class="panel-tab" data-tab="inspiration">灵感</div>
           <button id="btn-collapse-right" title="收起面板">»</button>
         </div>
         <div class="panel-content" id="panel-content"></div>
@@ -117,6 +111,7 @@
 <script src="/static/js/utils/debounce.js?v=20260801"></script>
 <script src="/static/js/state.js?v=20260801"></script>
 <script src="/static/js/core/nw.js?v=20260801"></script>
+<script src="/static/js/core/extensions.js?v=20260801"></script>
 <script src="/static/js/api.js?v=20260801"></script>
 <script src="/static/js/components/modal.js?v=20260801"></script>
 <script src="/static/js/components/score-helper.js?v=20260801"></script>

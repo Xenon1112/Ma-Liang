@@ -155,6 +155,14 @@ function nodeTypeLabel(type) {
   return map[type] || type;
 }
 
+// 注册右侧栏 tab(消费逻辑见 static/js/core/extensions.js)
+NW.registerComponent('sidebar.tabs', {
+  id: 'outline',
+  title: '大纲',
+  order: 10,
+  refresh: () => NW.plugins.outline.refresh(),
+});
+
 // 迁移期兼容别名:未迁移组件(app.js/search-panel.js)仍用全局名引用本面板
 const OutlinePanel = NW.plugins.outline;
 window.OutlinePanel = OutlinePanel;

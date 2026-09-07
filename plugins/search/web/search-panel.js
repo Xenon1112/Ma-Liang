@@ -150,6 +150,23 @@ function highlightKeyword(text, keyword) {
   return escaped.replace(new RegExp(kwEscaped.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '<mark>$&</mark>');
 }
 
+// 注册工具栏按钮(消费逻辑见 static/js/core/extensions.js)
+// closeIfOpen:供 app.js 的 Esc 处理调用,关闭已打开的搜索浮层
+NW.registerComponent('toolbar.actions', {
+  id: 'search',
+  label: '🔍 搜索',
+  title: '搜索 (Ctrl+P)',
+  order: 10,
+  onClick: () => NW.plugins.search.show(),
+  closeIfOpen: () => {
+    if (NW.plugins.search.visible) {
+      NW.plugins.search.hide();
+      return true;
+    }
+    return false;
+  },
+});
+
 // 迁移期兼容别名:未迁移组件(app.js 等)仍用全局名引用本组件
 const SearchPanel = NW.plugins.search;
 window.SearchPanel = SearchPanel;

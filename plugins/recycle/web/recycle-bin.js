@@ -76,6 +76,17 @@ function typeLabel(type) {
   return map[type] || type;
 }
 
+// 注册工具栏按钮(插到「快捷键」之前,消费逻辑见 static/js/core/extensions.js)
+NW.registerComponent('toolbar.actions', {
+  id: 'recycle',
+  label: '回收站',
+  title: '回收站',
+  order: 30,
+  container: '.toolbar-right',
+  before: 'btn-shortcuts',
+  onClick: () => NW.plugins.recycle.show(),
+});
+
 // 迁移期兼容别名:未迁移组件(app.js 等)仍用全局名引用本组件
 const RecycleBin = NW.plugins.recycle;
 window.RecycleBin = RecycleBin;

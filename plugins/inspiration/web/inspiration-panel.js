@@ -111,6 +111,14 @@ NW.plugins.inspiration = {
   },
 };
 
+// 注册右侧栏 tab(消费逻辑见 static/js/core/extensions.js)
+NW.registerComponent('sidebar.tabs', {
+  id: 'inspiration',
+  title: '灵感',
+  order: 40,
+  refresh: () => NW.plugins.inspiration.refresh(),
+});
+
 // 迁移期兼容别名:未迁移组件(app.js/search-panel.js)仍用全局名引用本面板
 const InspirationPanel = NW.plugins.inspiration;
 window.InspirationPanel = InspirationPanel;

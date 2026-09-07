@@ -117,6 +117,17 @@ NW.plugins.export = {
   },
 };
 
+// 注册工具栏按钮(插到「备份」之前,消费逻辑见 static/js/core/extensions.js)
+NW.registerComponent('toolbar.actions', {
+  id: 'export',
+  label: '导出',
+  title: '导出',
+  order: 20,
+  container: '.toolbar-right',
+  before: 'btn-backup',
+  onClick: () => NW.plugins.export.show(),
+});
+
 // 迁移期兼容别名:未迁移组件(app.js 等)仍用全局名引用本组件
 const ExportDialog = NW.plugins.export;
 window.ExportDialog = ExportDialog;
