@@ -101,7 +101,6 @@ novel-writer/
 │   └── plugin_manager.py       # 插件发现/校验/拓扑排序/动态加载/故障隔离
 ├── _version.py                 # 版本号注入 (importlib.metadata / 打包回退)
 ├── services/                   # 待迁移的业务模块（阶段 3）
-│   ├── script_service.py       # 剧本模式 (act/scene/element CRUD, 场景字数维护)
 │   ├── floating_song_service.py # 游离歌曲 (唱词/对白/重唱, 与正文互转)
 │   └── score_service.py        # 乐谱文件管理 + 调起 MuseScore
 ├── plugins/                    # 内置插件（一切皆插件，与第三方插件同协议；各含 plugin.json + backend.py，按需含 migrations/ + web/）
@@ -113,6 +112,8 @@ novel-writer/
 │   ├── inspiration/            # 灵感笔记
 │   ├── world_setting/          # 世界观设定
 │   ├── search/                 # 全文搜索
+│   ├── graph/                  # 内容节点地基 (graph_nodes + 类型注册表)
+│   ├── script/                 # 剧本模式 (act/scene/卡片 CRUD; 卡片存 graph_nodes, 场景字数维护)
 │   ├── recycle/                # 回收站 (软删除聚合/恢复/清理)
 │   ├── export/                 # TXT / Word (.docx) 导出，provide 导出路径解析
 │   ├── json_transfer/          # 整项目 JSON 导出/导入 (不含回收站)，依赖 export 插件
@@ -165,7 +166,7 @@ novel-writer/
   - Windows: `%APPDATA%/novel-writer/data.db`
   - macOS: `~/Library/Application Support/novel-writer/data.db`
   - Linux: `~/.novel-writer/data.db`
-- 21 张表：projects, volumes, chapters, drafts, outlines, characters, character_fields, character_appearances, world_settings, inspirations, tags, entity_tags, app_config, script_config, acts, scenes, script_elements, scene_characters, element_characters, floating_songs, floating_lyrics
+- 22 张表：projects, volumes, chapters, drafts, outlines, characters, character_fields, character_appearances, world_settings, inspirations, tags, entity_tags, app_config, script_config, acts, scenes, script_elements（仅回滚底牌，不再读写）, scene_characters, element_characters, floating_songs, floating_lyrics, graph_nodes
 - 版本化迁移 (v1→v5)，首次启动自动建表，老库自动升级
 
 ## 许可证

@@ -4,20 +4,16 @@
 保留天数配置读 legacy 无前缀键 recycleRetentionDays(迁移期允许,键名保持不变)。
 
 实体清单来自内核实体注册表(api.list_entities(),各实体插件 activate 时注册,
-请求处理时取用,无加载顺序依赖);尚未插件化的实体走下方 LEGACY_ENTITY_TABLES 过渡映射。
+请求处理时取用,无加载顺序依赖)。act/scene 已随 script 插件自行 register_entity,
+LEGACY_ENTITY_TABLES 过渡映射目前为空,留待后续未插件化实体使用。
 """
 import math
 from datetime import datetime, timedelta
 
 _api = None  # activate 时注入的 PluginAPI
 
-# 过渡映射:entity -> (table, name_column),只覆盖尚未插件化的实体
-# act/scene 属于 script 服务(services/script_service.py,表由 core/database.py 全局 schema 建),
-# 待阶段 3 script 迁移为插件并自行 register_entity 后删除本映射
-LEGACY_ENTITY_TABLES = {
-    "act": ("acts", "title"),
-    "scene": ("scenes", "title"),
-}
+# 过渡映射:entity -> (table, name_column),只覆盖尚未插件化的实体(当前为空)
+LEGACY_ENTITY_TABLES = {}
 
 def _entity_tables():
     """合并实体注册表与 legacy 过渡映射,返回 {entity: (table, name_column)};

@@ -15,18 +15,13 @@ from core.httpd import Flask, request, jsonify, send_from_directory, req_json, s
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _version import get_version
-from core.database import init_db, get_db_path, get_user_data_dir, soft_delete, get_conn
+from core.database import init_db, get_db_path, get_user_data_dir
 
 # PyInstaller 打包后资源位于 sys._MEIPASS；开发时为项目根目录
 BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 from core.config import get_config, set_config
-from services.script_service import (
-    list_acts, get_act, create_act, update_act, reorder_acts,
-    list_scenes, get_scene, create_scene, update_scene, reorder_scenes, set_scene_characters,
-    list_elements, get_element, create_element, update_element, delete_element, reorder_elements, move_element,
-)
 from services.floating_song_service import (
     list_floating_songs, create_floating_song, update_floating_song, delete_floating_song,
     add_lyric, update_lyric, delete_lyric, move_to_scene, move_to_floating,
@@ -158,112 +153,7 @@ def api_shutdown():
     return jsonify({"ok": True})
 
 
-# ====== Script: Act API ======
-
-@app.route("/api/acts", methods=["GET"])
-def api_list_acts():
-    return jsonify(list_acts(request.args.get("projectId", type=int)))
-
-@app.route("/api/acts/<int:id>", methods=["GET"])
-def api_get_act(id):
-    a = get_act(id)
-    return jsonify(a) if a else (jsonify({"error": "not found"}), 404)
-
-@app.route("/api/acts", methods=["POST"])
-def api_create_act():
-    return jsonify(create_act(snake_json())), 201
-
-@app.route("/api/acts/<int:id>", methods=["PUT"])
-def api_update_act(id):
-    return jsonify(update_act(id, snake_json()))
-
-@app.route("/api/acts/<int:id>", methods=["DELETE"])
-def api_delete_act(id):
-    conn = get_conn()
-    soft_delete(conn, "acts", id)
-    conn.close()
-    return jsonify({"ok": True})
-
-@app.route("/api/acts/reorder", methods=["POST"])
-def api_reorder_acts():
-    data = req_json()
-    reorder_acts(data["projectId"], data["orderedIds"])
-    return jsonify({"ok": True})
-
-
-# ====== Script: Scene API ======
-
-@app.route("/api/scenes", methods=["GET"])
-def api_list_scenes():
-    return jsonify(list_scenes(request.args.get("actId", type=int)))
-
-@app.route("/api/scenes/<int:id>", methods=["GET"])
-def api_get_scene(id):
-    s = get_scene(id)
-    return jsonify(s) if s else (jsonify({"error": "not found"}), 404)
-
-@app.route("/api/scenes", methods=["POST"])
-def api_create_scene():
-    return jsonify(create_scene(snake_json())), 201
-
-@app.route("/api/scenes/<int:id>", methods=["PUT"])
-def api_update_scene(id):
-    return jsonify(update_scene(id, snake_json()))
-
-@app.route("/api/scenes/<int:id>", methods=["DELETE"])
-def api_delete_scene(id):
-    conn = get_conn()
-    soft_delete(conn, "scenes", id)
-    conn.close()
-    return jsonify({"ok": True})
-
-@app.route("/api/scenes/reorder", methods=["POST"])
-def api_reorder_scenes():
-    data = req_json()
-    reorder_scenes(data["actId"], data["orderedIds"])
-    return jsonify({"ok": True})
-
-@app.route("/api/scenes/<int:id>/characters", methods=["PUT"])
-def api_set_scene_characters(id):
-    set_scene_characters(id, req_json().get("characterIds", []))
-    return jsonify({"ok": True})
-
-
-# ====== Script: Element API ======
-
-@app.route("/api/elements", methods=["GET"])
-def api_list_elements():
-    return jsonify(list_elements(request.args.get("sceneId", type=int)))
-
-@app.route("/api/elements/<int:id>", methods=["GET"])
-def api_get_element(id):
-    e = get_element(id)
-    return jsonify(e) if e else (jsonify({"error": "not found"}), 404)
-
-@app.route("/api/elements", methods=["POST"])
-def api_create_element():
-    return jsonify(create_element(snake_json())), 201
-
-@app.route("/api/elements/<int:id>", methods=["PUT"])
-def api_update_element(id):
-    return jsonify(update_element(id, snake_json()))
-
-@app.route("/api/elements/<int:id>", methods=["DELETE"])
-def api_delete_element(id):
-    delete_element(id)
-    return jsonify({"ok": True})
-
-@app.route("/api/elements/reorder", methods=["POST"])
-def api_reorder_elements():
-    data = req_json()
-    reorder_elements(data["sceneId"], data.get("parentId"), data["orderedIds"])
-    return jsonify({"ok": True})
-
-@app.route("/api/elements/<int:id>/move", methods=["POST"])
-def api_move_element(id):
-    data = req_json()
-    move_element(id, data.get("parentId"))
-    return jsonify({"ok": True})
+# ====== Script(剧本)路由已迁入 plugins/script(legacy_routes),本节不再注册 ======
 
 
 # ====== Floating Song API（游离歌曲，仅音乐剧） ======

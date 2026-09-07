@@ -1,8 +1,13 @@
 import json
 
-from core.database import get_conn, row_to_dict, next_sort_order
+from core.database import get_conn, row_to_dict, next_sort_order, count_words
 
 # ====== 游离歌曲（音乐剧：不挂场、不进正文，仅出现在 JSON 导出） ======
+#
+# G2a 注:正文剧作元素已迁入 graph_nodes(script 插件,旧 script_elements 表保留不读写)。
+# 本服务尚未插件化,与正文歌曲互转时直接 SQL 读写 graph_nodes(payload 里
+# scene_id/parent_id/character_id/content/song_title/score_file;异构父约定见 script 插件
+# docstring),G3 插件化时清理为插件间调用。
 
 def _parse_ids(raw):
     try:
@@ -132,11 +137,96 @@ def delete_lyric(id):
     conn.close()
 
 # ====== 与正文歌曲互转 ======
+#
+# 以下 _ 开头的 helper 直写 graph_nodes(G3 清理,见文件头注释)
+
+def _refresh_scene_word_count(conn, scene_id):
+    """重算场字数(与 script 插件同口径:该场未删元素的 content + song_title)"""
+    if not scene_id:
+        return
+    rows = conn.execute(
+        """SELECT json_extract(payload, '$.content') AS content,
+                  json_extract(payload, '$.song_title') AS song_title
+           FROM graph_nodes
+           WHERE json_extract(payload, '$.scene_id') = ? AND deleted_at IS NULL""",
+        (scene_id,)).fetchall()
+    total = sum(count_words(r["content"])[1] + count_words(r["song_title"])[1] for r in rows)
+    conn.execute("UPDATE scenes SET word_count = ? WHERE id = ?", (total, scene_id))
+
+
+def _create_scene_element(conn, scene_id, project_id, parent_id, element_type,
+                          content="", song_title="", character_ids=None):
+    """在场里建一个元素节点(等价 script 插件 create_element;parent_id 为父元素节点 id,顶层传 None)"""
+    if parent_id:
+        row = conn.execute(
+            """SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM graph_nodes
+               WHERE json_extract(payload, '$.parent_id') = ? AND deleted_at IS NULL""",
+            (parent_id,)).fetchone()
+    else:
+        row = conn.execute(
+            """SELECT COALESCE(MAX(sort_order), 0) + 1 AS n FROM graph_nodes
+               WHERE json_extract(payload, '$.scene_id') = ?
+                 AND json_extract(payload, '$.parent_id') IS NULL AND deleted_at IS NULL""",
+            (scene_id,)).fetchone()
+    character_ids = character_ids or []
+    payload = json.dumps({
+        "scene_id": scene_id, "parent_id": parent_id,
+        "character_id": character_ids[0] if character_ids else None,
+        "content": content, "song_title": song_title,
+        "score_file": None, "version_number": 1,
+    }, ensure_ascii=False)
+    cur = conn.execute(
+        "INSERT INTO graph_nodes (project_id, type, parent_id, sort_order, payload) VALUES (?, ?, ?, ?, ?)",
+        (project_id, element_type, parent_id or scene_id, row["n"], payload))
+    for i, cid in enumerate(character_ids):
+        conn.execute(
+            "INSERT OR IGNORE INTO element_characters (element_id, character_id, sort_order) VALUES (?, ?, ?)",
+            (cur.lastrowid, cid, i + 1))
+    return cur.lastrowid
+
+
+def _node_payload(row):
+    try:
+        return json.loads(row["payload"] or "{}")
+    except ValueError:
+        return {}
+
+
+def _node_to_element_dict(conn, node_id):
+    """graph_nodes 节点转旧 script_elements 形状的 dict(与 script 插件 _node_to_element 同形状,
+    保持 move-to-scene 的 HTTP 响应不变)"""
+    row = conn.execute("SELECT * FROM graph_nodes WHERE id = ?", (node_id,)).fetchone()
+    if row is None:
+        return None
+    p = _node_payload(row)
+    elem = {
+        "id": row["id"],
+        "scene_id": p.get("scene_id"),
+        "parent_id": p.get("parent_id"),
+        "element_type": row["type"],
+        "character_id": p.get("character_id"),
+        "content": p.get("content"),
+        "song_title": p.get("song_title"),
+        "sort_order": float(row["sort_order"] or 0),
+        "version_number": p.get("version_number"),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "deleted_at": row["deleted_at"],
+        "score_file": p.get("score_file"),
+    }
+    rows = conn.execute(
+        "SELECT character_id FROM element_characters WHERE element_id = ? ORDER BY sort_order, id",
+        (node_id,)).fetchall()
+    ids = [r["character_id"] for r in rows]
+    if not ids and elem["character_id"]:
+        ids = [elem["character_id"]]
+    elem["character_ids"] = ids
+    return elem
+
 
 def move_to_scene(floating_song_id, scene_id):
     """游离歌曲 → 正文歌曲：在目标场建 song 容器，按元素类型重建
     lyric/dialogue 子元素与 ensemble 容器（含其子元素），然后删除游离歌曲"""
-    from services.script_service import create_element
     conn = get_conn()
     song = conn.execute(
         "SELECT * FROM floating_songs WHERE id = ? AND deleted_at IS NULL", (floating_song_id,)).fetchone()
@@ -151,35 +241,42 @@ def move_to_scene(floating_song_id, scene_id):
         if l["element_type"] == "ensemble":
             children_map[l["id"]] = conn.execute(
                 "SELECT * FROM floating_lyrics WHERE parent_id = ? ORDER BY sort_order", (l["id"],)).fetchall()
-    conn.close()
+    srow = conn.execute("SELECT project_id FROM scenes WHERE id = ?", (scene_id,)).fetchone()
+    if not srow:
+        conn.close()
+        raise ValueError("场不存在")
+    project_id = srow["project_id"]
 
-    new_song = create_element({
-        "scene_id": scene_id, "element_type": "song", "song_title": song["song_title"],
-    })
+    new_song_id = _create_scene_element(
+        conn, scene_id, project_id, None, "song", song_title=song["song_title"])
     for l in top:
         ids = _parse_ids(l["character_ids"])
         if l["element_type"] == "ensemble":
-            ens = create_element({
-                "scene_id": scene_id, "parent_id": new_song["id"], "element_type": "ensemble",
-            })
+            ens_id = _create_scene_element(conn, scene_id, project_id, new_song_id, "ensemble")
             for ch in children_map.get(l["id"], []):
-                create_element({
-                    "scene_id": scene_id, "parent_id": ens["id"],
-                    "element_type": ch["element_type"] if ch["element_type"] in ("lyric", "dialogue") else "lyric",
-                    "content": ch["content"], "character_ids": _parse_ids(ch["character_ids"]),
-                })
+                _create_scene_element(
+                    conn, scene_id, project_id, ens_id,
+                    ch["element_type"] if ch["element_type"] in ("lyric", "dialogue") else "lyric",
+                    content=ch["content"], character_ids=_parse_ids(ch["character_ids"]))
         else:
-            create_element({
-                "scene_id": scene_id, "parent_id": new_song["id"],
-                "element_type": l["element_type"] if l["element_type"] in ("lyric", "dialogue") else "lyric",
-                "content": l["content"], "character_ids": ids,
-            })
+            _create_scene_element(
+                conn, scene_id, project_id, new_song_id,
+                l["element_type"] if l["element_type"] in ("lyric", "dialogue") else "lyric",
+                content=l["content"], character_ids=ids)
+    _refresh_scene_word_count(conn, scene_id)
+    conn.commit()
+    conn.close()
+
     # 乐谱随歌曲转移到正文（先改名挂在新的 song 元素上，再删游离歌曲，避免文件被清理）
     if song["score_file"]:
         from services import score_service
-        score_service.transfer_score(song["project_id"], song["score_file"], element_id=new_song["id"])
+        score_service.transfer_score(song["project_id"], song["score_file"], element_id=new_song_id)
     delete_floating_song(floating_song_id)
-    return new_song
+    # 返回完整元素 dict(与旧 create_element 返回值同形状,前端在读)
+    conn = get_conn()
+    elem = _node_to_element_dict(conn, new_song_id)
+    conn.close()
+    return elem
 
 def _element_singers(conn, element_id):
     """元素的演唱/说话角色列表：优先 element_characters，否则退回单 character_id"""
@@ -193,68 +290,105 @@ def _element_singers(conn, element_id):
             ids = [row["character_id"]]
     return ids
 
+def _element_singers(conn, element_id):
+    """元素的演唱/说话角色列表：优先 element_characters，否则退回单 character_id(在节点 payload)"""
+    rows = conn.execute(
+        "SELECT character_id FROM element_characters WHERE element_id = ? ORDER BY sort_order, id",
+        (element_id,)).fetchall()
+    ids = [r["character_id"] for r in rows]
+    if not ids:
+        row = conn.execute(
+            "SELECT json_extract(payload, '$.character_id') AS character_id FROM graph_nodes WHERE id = ?",
+            (element_id,)).fetchone()
+        if row and row["character_id"]:
+            ids = [row["character_id"]]
+    return ids
+
+def _element_children(conn, parent_id):
+    """某元素节点的未删子节点(按 payload.parent_id 取,异构父约定见 script 插件 docstring)"""
+    return conn.execute(
+        """SELECT * FROM graph_nodes WHERE json_extract(payload, '$.parent_id') = ?
+           AND deleted_at IS NULL ORDER BY sort_order""", (parent_id,)).fetchall()
+
 def move_to_floating(element_id):
     """正文歌曲 → 游离歌曲：完整转换 lyric/dialogue/ensemble（ensemble 容器连带其子元素）"""
     conn = get_conn()
-    song = conn.execute(
-        "SELECT * FROM script_elements WHERE id = ? AND deleted_at IS NULL", (element_id,)).fetchone()
-    if not song or song["element_type"] != "song":
+    song_row = conn.execute(
+        "SELECT * FROM graph_nodes WHERE id = ? AND deleted_at IS NULL", (element_id,)).fetchone()
+    song_p = _node_payload(song_row) if song_row else {}
+    if not song_row or song_row["type"] != "song":
         conn.close()
         raise ValueError("目标不是歌曲卡片")
-    children = conn.execute(
-        "SELECT * FROM script_elements WHERE parent_id = ? AND deleted_at IS NULL ORDER BY sort_order",
-        (element_id,)).fetchall()
+    song_title = song_p.get("song_title")
+    score_file = song_p.get("score_file")
+    children = _element_children(conn, element_id)
     supported = ("lyric", "dialogue", "ensemble")
-    if any(ch["element_type"] not in supported for ch in children):
+    if any(ch["type"] not in supported for ch in children):
         conn.close()
         raise ValueError("歌曲含暂不支持的元素类型，不能转为游离歌曲")
-    # 收集顶层元素及 ensemble 子元素的演唱者
+    # 收集顶层元素及 ensemble 子元素的演唱者与内容
     singers = {ch["id"]: _element_singers(conn, ch["id"]) for ch in children}
+    contents = {ch["id"]: _node_payload(ch).get("content") for ch in children}
     ens_children = {}
     for ch in children:
-        if ch["element_type"] == "ensemble":
-            subs = conn.execute(
-                "SELECT * FROM script_elements WHERE parent_id = ? AND deleted_at IS NULL ORDER BY sort_order",
-                (ch["id"],)).fetchall()
+        if ch["type"] == "ensemble":
+            subs = _element_children(conn, ch["id"])
             ens_children[ch["id"]] = subs
             for sub in subs:
                 singers[sub["id"]] = _element_singers(conn, sub["id"])
+                contents[sub["id"]] = _node_payload(sub).get("content")
+    scene_id = song_p.get("scene_id")
     conn.close()
 
     new_song = create_floating_song({
         "project_id": _project_of_element(element_id),
-        "song_title": song["song_title"] or "未命名歌曲",
+        "song_title": song_title or "未命名歌曲",
     })
     for ch in children:
-        if ch["element_type"] == "ensemble":
+        if ch["type"] == "ensemble":
             ens = add_lyric({"song_id": new_song["id"], "element_type": "ensemble"})
             for sub in ens_children.get(ch["id"], []):
                 add_lyric({
                     "song_id": new_song["id"], "parent_id": ens["id"],
-                    "element_type": sub["element_type"] if sub["element_type"] in ("lyric", "dialogue") else "lyric",
-                    "content": sub["content"], "character_ids": singers[sub["id"]],
+                    "element_type": sub["type"] if sub["type"] in ("lyric", "dialogue") else "lyric",
+                    "content": contents[sub["id"]], "character_ids": singers[sub["id"]],
                 })
         else:
             add_lyric({
-                "song_id": new_song["id"], "element_type": ch["element_type"],
-                "content": ch["content"], "character_ids": singers[ch["id"]],
+                "song_id": new_song["id"], "element_type": ch["type"],
+                "content": contents[ch["id"]], "character_ids": singers[ch["id"]],
             })
 
     # 乐谱随歌曲转移到游离歌曲（先改名挂到新行，再删原元素，避免文件被清理）
-    if song["score_file"]:
+    if score_file:
         from services import score_service
         score_service.transfer_score(
-            _project_of_element(element_id), song["score_file"], floating_song_id=new_song["id"])
+            _project_of_element(element_id), score_file, floating_song_id=new_song["id"])
 
-    # 删除原歌曲（子元素随 delete_element 删除）
-    from services.script_service import delete_element
-    delete_element(element_id)
+    # 删除原歌曲节点及其后代(等价 script 插件 delete_element:物理删,连带合唱者关联与场字数;
+    # 乐谱已在上面改名移走,旧节点 payload 里的 score_file 指向已改名文件,无需再清理)
+    conn = get_conn()
+    ids = [element_id]
+    frontier = [element_id]
+    while frontier:
+        rows = conn.execute(
+            "SELECT id FROM graph_nodes WHERE json_extract(payload, '$.parent_id') IN "
+            f"({','.join('?' * len(frontier))})", frontier).fetchall()
+        frontier = [r["id"] for r in rows]
+        ids.extend(frontier)
+    placeholders = ",".join("?" * len(ids))
+    conn.execute(f"DELETE FROM element_characters WHERE element_id IN ({placeholders})", ids)
+    conn.execute(f"DELETE FROM graph_nodes WHERE id IN ({placeholders})", ids)
+    _refresh_scene_word_count(conn, scene_id)
+    conn.commit()
+    conn.close()
     return new_song
 
 def _project_of_element(element_id):
     conn = get_conn()
     row = conn.execute(
-        "SELECT s.project_id AS pid FROM script_elements e JOIN scenes s ON e.scene_id = s.id WHERE e.id = ?",
+        """SELECT s.project_id AS pid FROM graph_nodes e
+           JOIN scenes s ON s.id = json_extract(e.payload, '$.scene_id') WHERE e.id = ?""",
         (element_id,)).fetchone()
     conn.close()
     if not row:

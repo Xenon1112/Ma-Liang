@@ -19,14 +19,14 @@
 payload 键即表名;"project" 根键(单对象、导入时标题加副本后缀)是导出格式固有的根,
 单独处理,不走默认处理器。
 
-仍走定制代码路径的表(都属于尚未插件化的 services,待阶段 3 迁移为插件后改用
-register_entity + hook 声明并清理此处):
-- acts/scenes/script_elements/scene_characters/element_characters/script_config
-  (services/script_service)
+仍走定制代码路径的表(属于剧本/乐谱等未声明式化的部分):
+- acts/scenes/scene_characters/element_characters/script_config(script 插件;
+  剧作元素本体已迁入 graph_nodes,本插件把节点 payload 展开/组装回旧 script_elements
+  行形状做导入导出,导出文件格式不变,旧导出文件仍可导入)
 - floating_songs/floating_lyrics(services/floating_song_service,嵌套 lyrics
   结构与 character_ids JSON 拼接字段,默认处理器表达不了)
-- 乐谱文件 base64 内嵌(services/score_service,script_elements/floating_songs
-  的 score_file 列)
+- 乐谱文件 base64 内嵌(services/score_service,graph_nodes payload 的 score_file
+  与 floating_songs 的 score_file 列)
 
 两个跨插件边界:
 - 导出文件路径解析复用 export 插件 provide 的 resolve_output_path,
@@ -136,7 +136,7 @@ def _build_export_payload(conn, project_id, include_deleted=False):
         payload[info["table"]] = _export_entity_rows(
             conn, info, project_id, id_sets, include_deleted)
 
-    # ====== 以下为尚未插件化的 services 表的定制代码路径(待阶段 3 清理,见模块 docstring)======
+    # ====== 以下为定制代码路径(见模块 docstring;acts/scenes 属 script 插件,元素已迁 graph_nodes)======
     pid = (project_id,)
     nd = "" if include_deleted else " AND deleted_at IS NULL"
     ch_ids = id_sets.get("chapter", set())
@@ -152,11 +152,32 @@ def _build_export_payload(conn, project_id, include_deleted=False):
     scene_ids = {r["id"] for r in scenes}
     payload["scenes"] = scenes
 
+    # 排序还原旧查询经 idx_elements_scene(scene_id, parent_id, sort_order) 的取数顺序
+    # (按场分组,场内顶层在前、再按父元素分组,组内按 sort_order),保证导出文件字节稳定
     elements = _fetch_all(conn, f"""
-        SELECT * FROM script_elements WHERE scene_id IN
-            (SELECT id FROM scenes WHERE project_id = ?){nd}
+        SELECT * FROM graph_nodes WHERE project_id = ?{nd}
+        ORDER BY json_extract(payload, '$.scene_id'), json_extract(payload, '$.parent_id'), sort_order
     """, pid)
-    elements = [r for r in elements if r["scene_id"] in scene_ids]
+    # 剧作元素已迁入 graph_nodes(script 插件):payload 展开回旧 script_elements 行形状
+    # (键序与旧表列序一致,sort_order 按旧 REAL 列语义转 float,保证导出文件字节稳定);
+    # payload 无 scene_id 的节点不是剧本元素,跳过
+    elem_rows = []
+    for n in elements:
+        try:
+            p = json.loads(n["payload"] or "{}")
+        except ValueError:
+            p = {}
+        if p.get("scene_id") is None:
+            continue
+        elem_rows.append({
+            "id": n["id"], "scene_id": p.get("scene_id"), "parent_id": p.get("parent_id"),
+            "element_type": n["type"], "character_id": p.get("character_id"),
+            "content": p.get("content"), "song_title": p.get("song_title"),
+            "sort_order": float(n["sort_order"] or 0), "version_number": p.get("version_number"),
+            "created_at": n["created_at"], "updated_at": n["updated_at"],
+            "deleted_at": n["deleted_at"], "score_file": p.get("score_file"),
+        })
+    elements = [r for r in elem_rows if r["scene_id"] in scene_ids]
     elem_ids = {r["id"] for r in elements}
     for r in elements:
         if r.get("parent_id") not in elem_ids:
@@ -182,8 +203,7 @@ def _build_export_payload(conn, project_id, include_deleted=False):
 
     e_chars = _fetch_all(conn, """
         SELECT * FROM element_characters WHERE element_id IN
-            (SELECT id FROM script_elements WHERE scene_id IN
-                (SELECT id FROM scenes WHERE project_id = ?))
+            (SELECT id FROM graph_nodes WHERE project_id = ?)
     """, pid)
     payload["element_characters"] = [r for r in e_chars
                                      if r["element_id"] in elem_ids and r["character_id"] in char_ids]
@@ -342,7 +362,7 @@ def import_project_json(payload):
                 continue
             id_maps[info["entity"]] = _import_entity_rows(conn, info, payload, id_maps)
 
-        # ====== 以下为尚未插件化的 services 表的定制代码路径(待阶段 3 清理,见模块 docstring)======
+        # ====== 以下为定制代码路径(见模块 docstring;acts/scenes 属 script 插件,元素已迁 graph_nodes)======
         vmap = id_maps.get("volume", {})
         cmap = id_maps.get("chapter", {})
         hmap = id_maps.get("character", {})
@@ -361,10 +381,59 @@ def import_project_json(payload):
                 elem_score_b64[r["id"]] = b
             elif r.get("score_file"):
                 r["score_file"] = None
-        emap = _insert_rows(conn, "script_elements", elem_rows,
-                            {"scene_id": smap, "character_id": hmap},
-                            required=("scene_id",), self_field="parent_id")
-        # 按新 id 写回乐谱文件并更新 score_file 列
+        # 剧作元素已迁入 graph_nodes(script 插件):旧行形状重新组装为节点
+        # (type=element_type,内容字段进 payload;scene_id 强引用映射不到整行跳过,
+        # character_id 弱引用悬空置 NULL,均与旧默认/定制语义一致)
+        emap = {}
+        pending_parent = []
+        for src in elem_rows:
+            if not isinstance(src, dict):
+                raise ValueError("导出文件格式不正确：script_elements 存在非法行")
+            row = dict(src)
+            old_id = row.pop("id", None)
+            old_parent = row.pop("parent_id", None)
+            scene_id = row.get("scene_id")
+            if scene_id is not None:
+                scene_id = smap.get(scene_id)
+                if scene_id is None:
+                    continue
+            character_id = row.get("character_id")
+            if character_id is not None:
+                character_id = hmap.get(character_id)
+            node_payload = json.dumps({
+                "scene_id": scene_id, "parent_id": None,
+                "character_id": character_id,
+                "content": row.get("content"), "song_title": row.get("song_title"),
+                "score_file": row.get("score_file"), "version_number": row.get("version_number"),
+            }, ensure_ascii=False)
+            # 列 parent_id 暂置场景 id(异构父),元素父在第二趟统一回写
+            cols = ["project_id", "type", "parent_id", "sort_order", "payload"]
+            vals = [new_project_id, row.get("element_type"), scene_id,
+                    row.get("sort_order", 0), node_payload]
+            for extra in ("created_at", "updated_at", "deleted_at"):
+                if extra in row:
+                    cols.append(extra)
+                    vals.append(row[extra])
+            cur = conn.execute(
+                f"INSERT INTO graph_nodes ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                vals)
+            if old_id is not None:
+                emap[old_id] = cur.lastrowid
+            if old_parent is not None:
+                pending_parent.append((cur.lastrowid, old_parent))
+        for new_id, old_parent in pending_parent:
+            new_parent = emap.get(old_parent)
+            if new_parent is None:
+                # 悬空 parent_id(父元素未导出)退回顶层:列 parent_id 保持场景 id,payload 置 null
+                conn.execute(
+                    "UPDATE graph_nodes SET payload = json_set(payload, '$.parent_id', NULL) WHERE id = ?",
+                    (new_id,))
+            else:
+                conn.execute(
+                    """UPDATE graph_nodes SET parent_id = ?,
+                           payload = json_set(payload, '$.parent_id', ?) WHERE id = ?""",
+                    (new_parent, new_parent, new_id))
+        # 按新 id 写回乐谱文件并更新 payload 的 score_file
         if elem_score_b64:
             from services import score_service
             for old_id, b in elem_score_b64.items():
@@ -373,8 +442,9 @@ def import_project_json(payload):
                     continue
                 filename = score_service.write_score_file(
                     new_project_id, f"element_{new_id}.mscz", base64.b64decode(b))
-                conn.execute("UPDATE script_elements SET score_file = ? WHERE id = ?",
-                             (filename, new_id))
+                conn.execute(
+                    "UPDATE graph_nodes SET payload = json_set(payload, '$.score_file', ?) WHERE id = ?",
+                    (filename, new_id))
         _insert_rows(conn, "scene_characters", _rows(payload, "scene_characters"),
                      {"scene_id": smap, "character_id": hmap},
                      required=("scene_id", "character_id"))

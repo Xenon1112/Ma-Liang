@@ -1,3 +1,4 @@
+import json
 import shutil
 import subprocess
 import sys
@@ -190,16 +191,22 @@ def get_musescore_path():
 
 
 def _locate_song(conn, project_id, element_id, floating_song_id):
-    """校验目标歌曲存在且属于该项目，返回 (table, row)"""
+    """校验目标歌曲存在且属于该项目，返回 (table, row)。
+    正文歌曲已迁入 graph_nodes(type='song',score_file/song_title 在 payload),游离歌曲仍在 floating_songs"""
     if element_id:
         row = conn.execute(
-            """SELECT se.* FROM script_elements se
-               JOIN scenes s ON se.scene_id = s.id
-               WHERE se.id = ? AND s.project_id = ? AND se.element_type = 'song'""",
+            "SELECT * FROM graph_nodes WHERE id = ? AND project_id = ? AND type = 'song'",
             (element_id, project_id)).fetchone()
         if not row:
             raise ValueError("歌曲不存在或不属于该项目")
-        return "script_elements", row
+        d = dict(row)
+        try:
+            p = json.loads(d.get("payload") or "{}")
+        except ValueError:
+            p = {}
+        d["score_file"] = p.get("score_file")
+        d["song_title"] = p.get("song_title")
+        return "graph_nodes", d
     if floating_song_id:
         row = conn.execute(
             "SELECT * FROM floating_songs WHERE id = ? AND project_id = ?",
@@ -208,6 +215,18 @@ def _locate_song(conn, project_id, element_id, floating_song_id):
             raise ValueError("游离歌曲不存在或不属于该项目")
         return "floating_songs", row
     raise ValueError("缺少 elementId 或 floatingSongId")
+
+
+def _set_score_file(conn, table, row_id, filename):
+    """写回 score_file:graph_nodes 走 payload 的 json_set, floating_songs 走列"""
+    if table == "graph_nodes":
+        conn.execute(
+            "UPDATE graph_nodes SET payload = json_set(payload, '$.score_file', ?), updated_at = datetime('now','localtime') WHERE id = ?",
+            (filename, row_id))
+    else:
+        conn.execute(
+            f"UPDATE {table} SET score_file = ?, updated_at = datetime('now','localtime') WHERE id = ?",
+            (filename, row_id))
 
 
 def _score_filename(element_id, floating_song_id):
@@ -256,9 +275,7 @@ def open_score(project_id, element_id=None, floating_song_id=None, song_title=No
     if not filename or not path.exists():
         title = song_title or row["song_title"] or "未命名歌曲"
         path = create_score_file(project_id, element_id, floating_song_id, title)
-        conn.execute(
-            f"UPDATE {table} SET score_file = ?, updated_at = datetime('now','localtime') WHERE id = ?",
-            (path.name, row["id"]))
+        _set_score_file(conn, table, row["id"], path.name)
         conn.commit()
         created = True
     conn.close()
@@ -275,9 +292,7 @@ def delete_score(project_id, element_id=None, floating_song_id=None):
         path = _score_abs_path(project_id, filename)
         if path.exists():
             path.unlink()
-        conn.execute(
-            f"UPDATE {table} SET score_file = NULL, updated_at = datetime('now','localtime') WHERE id = ?",
-            (row["id"],))
+        _set_score_file(conn, table, row["id"], None)
         conn.commit()
     conn.close()
 
@@ -301,10 +316,15 @@ def transfer_score(project_id, filename, element_id=None, floating_song_id=None)
     dst = _score_abs_path(project_id, new_name)
     if src != dst:
         src.replace(dst)
-    table = "script_elements" if element_id else "floating_songs"
     conn = get_conn()
-    conn.execute(f"UPDATE {table} SET score_file = ? WHERE id = ?",
-                 (new_name, element_id or floating_song_id))
+    # 正文歌曲在 graph_nodes(score_file 在 payload),游离歌曲在 floating_songs(score_file 列)
+    if element_id:
+        conn.execute(
+            "UPDATE graph_nodes SET payload = json_set(payload, '$.score_file', ?) WHERE id = ?",
+            (new_name, element_id))
+    else:
+        conn.execute("UPDATE floating_songs SET score_file = ? WHERE id = ?",
+                     (new_name, floating_song_id))
     conn.commit()
     conn.close()
 

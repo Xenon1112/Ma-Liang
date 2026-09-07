@@ -89,13 +89,17 @@ def full_text(project_id, keyword, types=None):
             text = r["setting"] if r["setting"] and keyword in r["setting"] else r["title"]
             scene_hits[r["id"]] = {"type": "scene", "id": r["id"], "title": r["title"],
                                    "subtitle": r["act_title"], "snippet": _snippet(text, keyword)}
+        # 剧作元素已迁入 graph_nodes(见 script 插件):内容/歌名在 payload,
+        # 无 scene_id 的非剧本节点 join 不上 scenes,自然排除
         rows = conn.execute("""
-            SELECT e.content, e.song_title, s.id AS scene_id, s.title AS scene_title, a.title AS act_title
-            FROM script_elements e
-            JOIN scenes s ON e.scene_id = s.id
+            SELECT json_extract(e.payload, '$.content') AS content,
+                   json_extract(e.payload, '$.song_title') AS song_title,
+                   s.id AS scene_id, s.title AS scene_title, a.title AS act_title
+            FROM graph_nodes e
+            JOIN scenes s ON s.id = json_extract(e.payload, '$.scene_id')
             JOIN acts a ON s.act_id = a.id
             WHERE s.project_id = ? AND e.deleted_at IS NULL AND s.deleted_at IS NULL AND a.deleted_at IS NULL
-            AND (e.content LIKE ? OR e.song_title LIKE ?)
+            AND (json_extract(e.payload, '$.content') LIKE ? OR json_extract(e.payload, '$.song_title') LIKE ?)
             ORDER BY a.sort_order, s.sort_order, e.sort_order, e.id
         """, (project_id, kw, kw)).fetchall()
         for r in rows:

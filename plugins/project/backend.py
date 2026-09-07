@@ -23,9 +23,9 @@ def list_projects():
              WHERE s.project_id = p.id AND s.deleted_at IS NULL AND a.deleted_at IS NULL) AS scene_count,
             (SELECT COALESCE(SUM(s.word_count), 0) FROM scenes s JOIN acts a ON s.act_id = a.id
              WHERE s.project_id = p.id AND s.deleted_at IS NULL AND a.deleted_at IS NULL) AS script_words,
-            (SELECT COUNT(*) FROM script_elements e
-             JOIN scenes s ON e.scene_id = s.id JOIN acts a ON s.act_id = a.id
-             WHERE s.project_id = p.id AND e.element_type = 'song'
+            (SELECT COUNT(*) FROM graph_nodes e
+             JOIN scenes s ON s.id = json_extract(e.payload, '$.scene_id') JOIN acts a ON s.act_id = a.id
+             WHERE s.project_id = p.id AND e.type = 'song'
                AND e.deleted_at IS NULL AND s.deleted_at IS NULL AND a.deleted_at IS NULL) AS body_song_count,
             (SELECT COUNT(*) FROM floating_songs f
              WHERE f.project_id = p.id AND f.deleted_at IS NULL) AS floating_song_count
@@ -164,9 +164,9 @@ def get_stats(project_id):
             (SELECT COALESCE(SUM(s.word_count), 0) FROM scenes s JOIN acts a ON s.act_id = a.id
              WHERE s.project_id = ? AND s.deleted_at IS NULL AND a.deleted_at IS NULL) AS total_words,
             (SELECT COUNT(*) FROM characters WHERE project_id = ? AND deleted_at IS NULL) AS character_count,
-            (SELECT COUNT(*) FROM script_elements e
-             JOIN scenes s ON e.scene_id = s.id JOIN acts a ON s.act_id = a.id
-             WHERE s.project_id = ? AND e.element_type = 'song'
+            (SELECT COUNT(*) FROM graph_nodes e
+             JOIN scenes s ON s.id = json_extract(e.payload, '$.scene_id') JOIN acts a ON s.act_id = a.id
+             WHERE s.project_id = ? AND e.type = 'song'
                AND e.deleted_at IS NULL AND s.deleted_at IS NULL AND a.deleted_at IS NULL) AS body_song_count,
             (SELECT COUNT(*) FROM floating_songs WHERE project_id = ? AND deleted_at IS NULL) AS floating_song_count
     """, (project_id,) * 6).fetchone()

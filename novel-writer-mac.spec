@@ -27,7 +27,6 @@ a = Analysis(
         'core.config',
         'core.database',
         'core.httpd',
-        'services.script_service',
         'services.floating_song_service',
         'services.score_service',
     ],

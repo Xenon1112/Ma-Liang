@@ -1,9 +1,10 @@
 """TXT / DOCX 导出插件:数据访问 + 路由注册(原 services/export_service.py 与 app.py Export 路由迁移而来)
 
-无专属表(直接 SQL 读 chapters/drafts/volumes/acts 等表),故无 migrations 目录。
+无专属表(直接 SQL 读 chapters/drafts/volumes/acts/graph_nodes 等表),故无 migrations 目录。
 对外 provide "export" 服务:json_transfer 插件的整项目 JSON 导出复用 resolve_output_path,
 运行时通过 api.require("export") 获取,避免插件间直接 import。
 """
+import json
 from pathlib import Path
 
 _api = None  # activate 时注入的 PluginAPI
@@ -84,14 +85,33 @@ def _get_project_type(project_id):
     return (row["project_type"], row["title"]) if row else ("novel", "export")
 
 
+def _node_to_element(row):
+    """graph_nodes 行展开为导出用的元素 dict(剧作元素已迁入 graph_nodes,见 script 插件)。
+    只取导出排版需要的字段:节点 type 即 element_type,内容字段在 payload"""
+    try:
+        p = json.loads(row["payload"] or "{}")
+    except ValueError:
+        p = {}
+    return {
+        "id": row["id"],
+        "element_type": row["type"],
+        "character_id": p.get("character_id"),
+        "content": p.get("content"),
+        "song_title": p.get("song_title"),
+        "score_file": p.get("score_file"),
+    }
+
+
 def _get_script_contents(project_id):
-    """剧本/音乐剧结构：幕 → 场 → 元素（容器可嵌套：歌曲 → 重唱 → 分部唱词）"""
+    """剧本/音乐剧结构：幕 → 场 → 元素（容器可嵌套：歌曲 → 重唱 → 分部唱词）。
+    元素存 graph_nodes:按场/按父元素取数一律过 payload 条件(scene_id/parent_id),
+    不能只看 parent_id 列(异构父约定:顶层元素的 parent_id 列是场景 id,与节点 id 可能数值相撞)"""
     conn = _api.db()
     char_names = {r["id"]: r["name"] for r in conn.execute(
         "SELECT id, name FROM characters WHERE project_id = ?", (project_id,)).fetchall()}
 
     def build_element(row, depth=0):
-        e = _api.row_to_dict(row)
+        e = _node_to_element(row)
         id_rows = conn.execute(
             "SELECT character_id FROM element_characters WHERE element_id = ? ORDER BY sort_order, id",
             (e["id"],)).fetchall()
@@ -107,8 +127,8 @@ def _get_script_contents(project_id):
         e["characterName"] = name_str
         if e["element_type"] in ("song", "ensemble", "dual") and depth < 4:
             children = conn.execute(
-                """SELECT * FROM script_elements WHERE parent_id = ? AND deleted_at IS NULL
-                   ORDER BY sort_order""", (e["id"],)).fetchall()
+                """SELECT * FROM graph_nodes WHERE json_extract(payload, '$.parent_id') = ?
+                   AND deleted_at IS NULL ORDER BY sort_order""", (e["id"],)).fetchall()
             e["children"] = [build_element(c, depth + 1) for c in children]
         return e
 
@@ -121,7 +141,8 @@ def _get_script_contents(project_id):
         sc_list = []
         for sc in scenes:
             elems = conn.execute(
-                """SELECT * FROM script_elements WHERE scene_id = ? AND parent_id IS NULL
+                """SELECT * FROM graph_nodes WHERE json_extract(payload, '$.scene_id') = ?
+                   AND json_extract(payload, '$.parent_id') IS NULL
                    AND deleted_at IS NULL ORDER BY sort_order""", (sc["id"],)).fetchall()
             sc_list.append({
                 "title": sc["title"],
