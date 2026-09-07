@@ -116,6 +116,9 @@ class Plugin:
         global _api
         _api = api
 
+        api.register_entity(entity="character", table="characters", label="人物",
+                            name_column="name", export=True, export_order=50)
+
         # ====== Character API ======
 
         @api.route("/api/characters", methods=["GET"])

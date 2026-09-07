@@ -13,6 +13,7 @@ import re
 import sys
 from pathlib import Path
 
+from core import registry as _entity_registry
 from core.database import get_conn, get_user_data_dir
 from core.plugin_api import PluginAPI
 
@@ -41,6 +42,7 @@ def _reset():
     _plugins.clear()
     _load_order.clear()
     _legacy_db = None
+    _entity_registry._reset()
 
 
 def discover(builtin_dir=None, user_dir=None):

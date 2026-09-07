@@ -187,6 +187,9 @@ class Plugin:
         global _api
         _api = api
 
+        api.register_entity(entity="project", table="projects", label="作品",
+                            export=True, export_order=10)
+
         @api.route("/api/projects", methods=["GET"])
         def api_list_projects():
             return api.jsonify(list_projects())

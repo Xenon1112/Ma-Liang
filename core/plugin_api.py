@@ -5,7 +5,7 @@
 """
 import logging
 
-from core import events
+from core import events, registry
 from core.config import DEFAULTS as _CONFIG_DEFAULTS
 from core.database import (
     count_words,
@@ -112,6 +112,21 @@ class PluginAPI:
 
     def emit(self, event, **payload):
         events.emit(event, **payload)
+
+    # ====== 实体注册表 ======
+
+    def register_entity(self, entity, table, label, name_column="title",
+                        export=False, export_order=100):
+        """声明「本插件有这样一个数据实体」,供回收站/导出器等消费者查询。
+        同一插件重复注册同一 entity 抛错"""
+        registry.register_entity(
+            self.plugin_id, entity, table, label,
+            name_column=name_column, export=export, export_order=export_order,
+        )
+
+    def list_entities(self):
+        """全部已注册实体的信息列表(plugin_id/entity/table/label/name_column/export/export_order)"""
+        return registry.list_entities()
 
     # ====== 服务注册表 ======
 

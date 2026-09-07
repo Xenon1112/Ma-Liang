@@ -28,6 +28,8 @@ class Plugin:
 
         api.provide("fixture", {"hello": lambda: "world"})
         api.emit("fixture.activated", source="fixture_good")
+        api.register_entity(entity="item", table="fixture_good__items", label="条目",
+                            export=True, export_order=42)
 '''
 
 GOOD_MIGRATION = """
@@ -106,6 +108,31 @@ def main():
     svc = consumer.require("fixture")
     check("服务可 require", svc is not None and svc["hello"]() == "world")
     check("事件可收到", received == [{"source": "fixture_good"}], str(received))
+
+    # --- 实体注册表 ---
+    entities = consumer.list_entities()
+    fixture_entity = next((e for e in entities
+                           if e["plugin_id"] == "fixture_good" and e["entity"] == "item"), None)
+    check("fixture 注册的实体可 list_entities 查到", fixture_entity is not None, str(entities))
+    check("实体注册信息字段完整", fixture_entity == {
+        "plugin_id": "fixture_good", "entity": "item",
+        "table": "fixture_good__items", "label": "条目",
+        "name_column": "title", "export": True, "export_order": 42,
+    }, str(fixture_entity))
+
+    dup_error = None
+    try:
+        consumer.register_entity(entity="item2", table="t", label="x")
+        consumer.register_entity(entity="item2", table="t", label="x")
+    except ValueError as e:
+        dup_error = str(e)
+    check("同一插件重复注册同一实体抛错", dup_error is not None and "重复注册实体" in dup_error,
+          str(dup_error))
+
+    # 模拟 recycle 的消费方式:按 list_entities() 构建 entity -> (table, name_column) 映射
+    entity_tables = {e["entity"]: (e["table"], e["name_column"]) for e in consumer.list_entities()}
+    check("recycle 式消费可见 fixture 实体",
+          entity_tables.get("item") == ("fixture_good__items", "title"), str(entity_tables))
 
     # --- 坏插件 ---
     check("坏插件标记 failed", reg.get("fixture_bad", {}).get("status") == "failed",

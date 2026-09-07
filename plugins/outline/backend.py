@@ -87,6 +87,9 @@ class Plugin:
         global _api
         _api = api
 
+        api.register_entity(entity="outline", table="outlines", label="大纲",
+                            export=True, export_order=40)
+
         @api.route("/api/outlines", methods=["GET"])
         def api_outline_tree():
             project_id = api.request.args.get("projectId", type=int)

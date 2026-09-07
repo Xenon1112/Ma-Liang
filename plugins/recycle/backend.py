@@ -2,26 +2,29 @@
 
 无专属表(软删除标记在各业务表的 deleted_at 列),故无 migrations 目录。
 保留天数配置读 legacy 无前缀键 recycleRetentionDays(迁移期允许,键名保持不变)。
+
+实体清单来自内核实体注册表(api.list_entities(),各实体插件 activate 时注册,
+请求处理时取用,无加载顺序依赖);尚未插件化的实体走下方 LEGACY_ENTITY_TABLES 过渡映射。
 """
 import math
 from datetime import datetime, timedelta
 
 _api = None  # activate 时注入的 PluginAPI
 
-ENTITY_TABLES = {
-    "project": "projects",
-    "volume": "volumes",
-    "chapter": "chapters",
-    "outline": "outlines",
-    "character": "characters",
-    "world_setting": "world_settings",
-    "inspiration": "inspirations",
-    "act": "acts",
-    "scene": "scenes",
+# 过渡映射:entity -> (table, name_column),只覆盖尚未插件化的实体
+# act/scene 属于 script 服务(services/script_service.py,表由 core/database.py 全局 schema 建),
+# 待阶段 3 script 迁移为插件并自行 register_entity 后删除本映射
+LEGACY_ENTITY_TABLES = {
+    "act": ("acts", "title"),
+    "scene": ("scenes", "title"),
 }
 
-# 名称列不一致：characters 用 name，其余用 title
-NAME_COLUMNS = {"characters": "name"}
+def _entity_tables():
+    """合并实体注册表与 legacy 过渡映射,返回 {entity: (table, name_column)}"""
+    tables = dict(LEGACY_ENTITY_TABLES)
+    for info in _api.list_entities():
+        tables[info["entity"]] = (info["table"], info["name_column"])
+    return tables
 
 def _retention_days():
     return int(_api.get_config("recycleRetentionDays", 30))
@@ -42,8 +45,7 @@ def list_recycle():
     retention_days = _retention_days()
     now = datetime.now()
 
-    for etype, table in ENTITY_TABLES.items():
-        name_col = NAME_COLUMNS.get(table, "title")
+    for etype, (table, name_col) in _entity_tables().items():
         rows = conn.execute(f"SELECT id, {name_col} AS title, deleted_at FROM {table} WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC").fetchall()
         for r in rows:
             remaining, expired = _remaining_days(r["deleted_at"], retention_days, now)
@@ -67,21 +69,21 @@ def _require_deleted(conn, table, id):
 def restore(entity_type, id):
     conn = _api.db()
     try:
-        table = ENTITY_TABLES.get(entity_type)
-        if table:
+        entry = _entity_tables().get(entity_type)
+        if entry:
             # _require_deleted 可能抛 ValueError，finally 保证连接关闭（否则 Windows 上泄漏的连接会锁定 WAL 文件）
-            _require_deleted(conn, table, id)
-            _api.restore_soft_delete(conn, table, id)
+            _require_deleted(conn, entry[0], id)
+            _api.restore_soft_delete(conn, entry[0], id)
     finally:
         conn.close()
 
 def permanently_delete(entity_type, id):
     conn = _api.db()
     try:
-        table = ENTITY_TABLES.get(entity_type)
-        if table:
-            _require_deleted(conn, table, id)
-            conn.execute(f"DELETE FROM {table} WHERE id = ?", (id,))
+        entry = _entity_tables().get(entity_type)
+        if entry:
+            _require_deleted(conn, entry[0], id)
+            conn.execute(f"DELETE FROM {entry[0]} WHERE id = ?", (id,))
             conn.commit()
     finally:
         conn.close()
@@ -90,7 +92,7 @@ def clean_expired():
     conn = _api.db()
     retention_days = _retention_days()
     total = 0
-    for etype, table in ENTITY_TABLES.items():
+    for etype, (table, name_col) in _entity_tables().items():
         cur = conn.execute(
             f"DELETE FROM {table} WHERE deleted_at IS NOT NULL AND datetime(deleted_at, '+' || ? || ' days') < datetime('now','localtime')",
             (retention_days,)

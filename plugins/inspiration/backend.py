@@ -56,6 +56,9 @@ class Plugin:
         global _api
         _api = api
 
+        api.register_entity(entity="inspiration", table="inspirations", label="灵感",
+                            export=True, export_order=70)
+
         @api.route("/api/inspirations", methods=["GET"])
         def api_list_inspirations():
             project_id = api.request.args.get("projectId", type=int)
